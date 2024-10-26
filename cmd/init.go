@@ -7,7 +7,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"sa1l.nubi/sinit/utils"
+	"sa1l.nubi/sinit/utils/project"
 )
 
 var baseType string
@@ -19,7 +19,7 @@ var initCmd = &cobra.Command{
 	Short: "A brief description of your command",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
-		if err := utils.InitProject(projectPath); err != nil {
+		if err := project.InitProject(projectPath); err != nil {
 			fmt.Println("Init error!")
 			return
 		}
