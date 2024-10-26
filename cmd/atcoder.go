@@ -6,8 +6,8 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/sa1L-A/sinit/utils/atcoder"
 	"github.com/spf13/cobra"
-	"sa1l.nubi/sinit/utils/atcoder"
 )
 
 // atcoderCmd represents the atcoder command
