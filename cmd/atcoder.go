@@ -1,6 +1,3 @@
-/*
-Copyright © 2024 NAME HERE <EMAIL ADDRESS>
-*/
 package cmd
 
 import (
@@ -10,7 +7,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// atcoderCmd represents the atcoder command
 var atcoderCmd = &cobra.Command{
 	Use:   "ac",
 	Short: "Fetch algorithm problems and create directory structure for a contest.",
