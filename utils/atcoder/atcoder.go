@@ -93,7 +93,8 @@ func createFile(data []byte, fileName string) error {
 	if !os.IsNotExist(err) {
 		return nil
 	}
-	file, err := os.Create(fileName)
+	safeTitle := strings.ReplaceAll(fileName, "/", "_")
+	file, err := os.Create(safeTitle)
 	if err != nil {
 		return fmt.Errorf("error creating file %s: %v", fileName, err)
 	}
