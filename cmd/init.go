@@ -6,7 +6,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/sa1L-A/sinit/utils/project"
+	"github.com/sa1la/sinit/utils/project"
 	"github.com/spf13/cobra"
 )
 

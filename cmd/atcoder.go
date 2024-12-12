@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/sa1L-A/sinit/utils/atcoder"
+	"github.com/sa1la/sinit/utils/atcoder"
 	"github.com/spf13/cobra"
 )
 
