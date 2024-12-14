@@ -6,7 +6,7 @@ import (
 	"os/exec"
 )
 
-func InitProject(projectName string) error {
+func InitProject(projectName string, username string, email string) error {
 	// We need to change the current working directory to the new project directory
 	if err := os.Chdir(projectName); err != nil {
 		fmt.Println("Error changing directory to new project:", err)
@@ -26,6 +26,16 @@ func InitProject(projectName string) error {
 		return err
 	}
 
+	configUserCmd := exec.Command("git", "config", "--local", "user.name", username)
+	if err := configUserCmd.Run(); err != nil {
+		fmt.Println("Error config username to git repository:", err)
+		return err
+	}
+	configEmailCmd := exec.Command("git", "config", "--local", "user.email", email)
+	if err := configEmailCmd.Run(); err != nil {
+		fmt.Println("Error config email to git repository:", err)
+		return err
+	}
 	// We need to make an initial commit
 	addCmd := exec.Command("git", "add", ".")
 	if err := addCmd.Run(); err != nil {
