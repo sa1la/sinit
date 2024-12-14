@@ -22,7 +22,7 @@ const (
 
 	_ProblemFileTemp = `package {{.ContestID}}
 
-import "github.com/sa1L-A/goin"
+import "github.com/sa1la/goin"
 
 //TODO {{.CurrentDate}} {{.ContestID}}.{{.ID}}
 // {{.URL}}
