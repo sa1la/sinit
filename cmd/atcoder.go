@@ -9,7 +9,7 @@ import (
 
 var atcoderCmd = &cobra.Command{
 	Use:   "ac",
-	Short: "Fetch algorithm problems and create directory structure for a contest.",
+	Short: "Fetch algorithm problems and create directory structure for a contest. BTW, this is for golang.",
 	Long:  `This command pulls algorithm problems based on the contest ID, generates a folder, and creates algorithm solution files within it. Example usage: sinit ac -c=abc375`,
 	Run: func(cmd *cobra.Command, args []string) {
 		atcoder.CheckValidDir()
@@ -18,7 +18,7 @@ var atcoderCmd = &cobra.Command{
 			fmt.Scanln(&contestsID)
 		}
 		fmt.Println("creating...")
-		if err := atcoder.CreateContestsTasks(contestsID); err != nil {
+		if err := atcoder.CreateContestsTasks(contestsID, atcoder.GOLANG); err != nil {
 			fmt.Printf("%v\n", err)
 			return
 		}

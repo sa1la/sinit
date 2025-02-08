@@ -20,7 +20,7 @@ const (
 
 	_Yes = "y"
 
-	_ProblemFileTemp = `package {{.ContestID}}
+	_ProblemFileTempForGo = `package {{.ContestID}}
 
 import "github.com/sa1L-A/goin"
 
@@ -30,7 +30,18 @@ func Solve{{.ID}}() {
 	defer goin.Flush()
 
 }`
+	_ProblemFileTempForRust = `//TODO {{.CurrentDate}} {{.ContestID}}.{{.ID}} {{.Title}}
+// {{.URL}}
+#[allow(dead_code)]
+pub fn solve_{{.ID}}() {
+
+}
+
+`
 )
+const GOLANG = "go"
+
+const RUST = "rust"
 
 // Problem represents a coding problem in an AtCoder contest.
 type Problem struct {
@@ -43,7 +54,7 @@ type Problem struct {
 
 var contest string
 
-func CreateContestsTasks(contestID string) error {
+func CreateContestsTasks(contestID string, lang string) error {
 
 	contest = contestID
 	url := fmt.Sprintf("https://atcoder.jp/contests/%s/tasks?lang=en", contestID)
@@ -52,7 +63,11 @@ func CreateContestsTasks(contestID string) error {
 		return err
 	}
 	problems := extractTasks(body)
-	createContestsProblems(problems, contestID)
+	if lang == GOLANG {
+		createContestsProblemsForGo(problems, contestID)
+	} else {
+		createContestsProblemsForRust(problems, contestID)
+	}
 	return nil
 }
 
@@ -107,7 +122,7 @@ func createFile(data []byte, fileName string) error {
 	return nil
 }
 
-func createContestsProblems(problems []Problem, contestsID string) error {
+func createContestsProblemsForGo(problems []Problem, contestsID string) error {
 	if err := os.MkdirAll(contestsID, os.ModePerm); err != nil {
 		return fmt.Errorf("error creating directory %s: %v", contestsID, err)
 	}
@@ -127,7 +142,7 @@ func createContestsProblems(problems []Problem, contestsID string) error {
 		fileName := fmt.Sprintf("%s.go", prob.Title)
 
 		var data strings.Builder
-		tmpl, err := template.New("problem").Parse(_ProblemFileTemp)
+		tmpl, err := template.New("problem").Parse(_ProblemFileTempForGo)
 		if err != nil {
 			return fmt.Errorf("error parsing template: %v", err)
 		}
@@ -141,6 +156,33 @@ func createContestsProblems(problems []Problem, contestsID string) error {
 	}
 
 	cmd := exec.Command("gofmt", "-w", ".")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("error running gofmt: %v", err)
+	}
+
+	return nil
+}
+
+func createContestsProblemsForRust(problems []Problem, contestsID string) error {
+	fileName := fmt.Sprintf("%s.rs", contestsID)
+	fileContent := []byte{}
+	for _, prob := range problems {
+		var data strings.Builder
+		tmpl, err := template.New("problem").Parse(_ProblemFileTempForRust)
+		if err != nil {
+			return fmt.Errorf("error parsing template: %v", err)
+		}
+		prob.ID = strings.ToLower(prob.ID)
+		if err := tmpl.Execute(&data, prob); err != nil {
+			return fmt.Errorf("error executing template: %v", err)
+		}
+		fileContent = append(fileContent, []byte(data.String())...)
+	}
+	if err := createFile(fileContent, fileName); err != nil {
+		return fmt.Errorf("error creating problem file %s: %v", fileName, err)
+	}
+
+	cmd := exec.Command("rustfmt", fileName)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("error running gofmt: %v", err)
 	}
