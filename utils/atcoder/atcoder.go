@@ -3,11 +3,11 @@ package atcoder
 import (
 	"bytes"
 	"fmt"
-	"html/template"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
+	"text/template"
 	"time"
 
 	"net/http"
