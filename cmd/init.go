@@ -1,6 +1,3 @@
-/*
-Copyright © 2023 NAME HERE <EMAIL ADDRESS>
-*/
 package cmd
 
 import (
@@ -10,19 +7,19 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var baseType string
-var projectPath string
-var username string
-var email string
+var (
+	projectPath string
+	username    string
+	email       string
+)
 
-// initCmd represents the init command
 var initCmd = &cobra.Command{
 	Use:   "init",
-	Short: "A brief description of your command",
-	Long:  ``,
+	Short: "Reset a project's git history and create a fresh initial commit.",
+	Long:  `Removes the existing .git directory in the target project, re-initializes a new repository, configures the local user.name/user.email, and creates an initial commit. Example: sinit init -p=./my-project -u=alice -e=alice@example.com`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := project.InitProject(projectPath, username, email); err != nil {
-			fmt.Println("Init error!")
+			fmt.Printf("Init error: %v\n", err)
 			return
 		}
 		fmt.Println("Project init successfully!")
@@ -30,9 +27,8 @@ var initCmd = &cobra.Command{
 }
 
 func init() {
-	initCmd.Flags().StringVarP(&baseType, "type", "t", "git", "-t=xxx")
-	initCmd.Flags().StringVarP(&projectPath, "project", "p", ".", "-p=xxx")
-	initCmd.Flags().StringVarP(&username, "user", "u", "admin", "-u=xxx")
-	initCmd.Flags().StringVarP(&email, "email", "e", "default@email.com", "-u=default@email.com")
+	initCmd.Flags().StringVarP(&projectPath, "project", "p", ".", "-p=path/to/project")
+	initCmd.Flags().StringVarP(&username, "user", "u", "admin", "-u=username")
+	initCmd.Flags().StringVarP(&email, "email", "e", "default@email.com", "-e=email@example.com")
 	rootCmd.AddCommand(initCmd)
 }

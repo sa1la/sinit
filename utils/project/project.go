@@ -6,47 +6,35 @@ import (
 	"os/exec"
 )
 
-func InitProject(projectName string, username string, email string) error {
-	// We need to change the current working directory to the new project directory
+func InitProject(projectName, username, email string) error {
+	originalDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("error getting current directory: %v", err)
+	}
+	defer os.Chdir(originalDir)
+
 	if err := os.Chdir(projectName); err != nil {
-		fmt.Println("Error changing directory to new project:", err)
-		return err
-	}
-	// We need to run the following command to remove the git history and start a new repository
-	resetCmd := exec.Command("rm", "-rf", ".git")
-	if err := resetCmd.Run(); err != nil {
-		fmt.Println("Error removing git history:", err)
-		return err
+		return fmt.Errorf("error changing directory to %s: %v", projectName, err)
 	}
 
-	// We need to initialize a new git repository
-	initCmd := exec.Command("git", "init")
-	if err := initCmd.Run(); err != nil {
-		fmt.Println("Error initializing new git repository:", err)
-		return err
+	if err := os.RemoveAll(".git"); err != nil {
+		return fmt.Errorf("error removing git history: %v", err)
 	}
 
-	configUserCmd := exec.Command("git", "config", "--local", "user.name", username)
-	if err := configUserCmd.Run(); err != nil {
-		fmt.Println("Error config username to git repository:", err)
-		return err
+	steps := []struct {
+		name string
+		args []string
+	}{
+		{"git", []string{"init"}},
+		{"git", []string{"config", "--local", "user.name", username}},
+		{"git", []string{"config", "--local", "user.email", email}},
+		{"git", []string{"add", "."}},
+		{"git", []string{"commit", "-m", "Initial commit"}},
 	}
-	configEmailCmd := exec.Command("git", "config", "--local", "user.email", email)
-	if err := configEmailCmd.Run(); err != nil {
-		fmt.Println("Error config email to git repository:", err)
-		return err
-	}
-	// We need to make an initial commit
-	addCmd := exec.Command("git", "add", ".")
-	if err := addCmd.Run(); err != nil {
-		fmt.Println("Error adding files to git repository:", err)
-		return err
-	}
-
-	commitCmd := exec.Command("git", "commit", "-m", "Initial commit")
-	if err := commitCmd.Run(); err != nil {
-		fmt.Println("Error making initial commit:", err)
-		return err
+	for _, s := range steps {
+		if err := exec.Command(s.name, s.args...).Run(); err != nil {
+			return fmt.Errorf("error running %s %v: %v", s.name, s.args, err)
+		}
 	}
 	return nil
 }

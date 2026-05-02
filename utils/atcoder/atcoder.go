@@ -4,21 +4,24 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"text/template"
 	"time"
-
-	"net/http"
 
 	"github.com/PuerkitoBio/goquery"
 )
 
 const (
-	_Atcoder_host = "https://atcoder.jp"
+	_AtcoderHost = "https://atcoder.jp"
+	_Yes         = "y"
+	_HTTPTimeout = 15 * time.Second
 
-	_Yes = "y"
+	GOLANG = "go"
+	RUST   = "rust"
 
 	_ProblemFileTempForGo = `package {{.ContestID}}
 
@@ -30,6 +33,7 @@ func Solve{{.ID}}() {
 	defer goin.Flush()
 
 }`
+
 	_ProblemFileTempForRust = `//TODO {{.CurrentDate}} {{.ContestID}}.{{.ID}} {{.Title}}
 // {{.URL}}
 #[allow(dead_code)]
@@ -39,115 +43,124 @@ pub fn solve_{{.ID}}() {
 
 `
 )
-const GOLANG = "go"
 
-const RUST = "rust"
-
-// Problem represents a coding problem in an AtCoder contest.
 type Problem struct {
-	ContestID   string // ContestID identifies the specific contest this problem belongs to.
-	ID          string // ID is the unique identifier for the problem within the contest.
-	Title       string // Title is the name of the problem.
-	URL         string // URL is the link to the problem's page on the AtCoder website.
+	ContestID   string
+	ID          string
+	Title       string
+	URL         string
 	CurrentDate string
 }
 
-var contest string
+var (
+	httpClient = &http.Client{Timeout: _HTTPTimeout}
+	goTmpl     = template.Must(template.New("go").Parse(_ProblemFileTempForGo))
+	rustTmpl   = template.Must(template.New("rust").Parse(_ProblemFileTempForRust))
+)
 
-func CreateContestsTasks(contestID string, lang string) error {
+func RenderProblem(w io.Writer, p Problem, lang string) error {
+	switch lang {
+	case GOLANG:
+		return goTmpl.Execute(w, p)
+	case RUST:
+		return rustTmpl.Execute(w, p)
+	default:
+		return fmt.Errorf("unsupported lang: %q", lang)
+	}
+}
 
-	contest = contestID
-	url := fmt.Sprintf("https://atcoder.jp/contests/%s/tasks?lang=en", contestID)
-	body, err := fetchHTML(url)
+func CreateContestsTasks(contestID, lang string) error {
+	url := fmt.Sprintf("%s/contests/%s/tasks?lang=en", _AtcoderHost, contestID)
+	body, err := fetchHTML(url, contestID)
 	if err != nil {
 		return err
 	}
-	problems := extractTasks(body)
-	if lang == GOLANG {
-		createContestsProblemsForGo(problems, contestID)
-	} else {
-		createContestsProblemsForRust(problems, contestID)
+	problems := extractTasks(body, contestID)
+	switch lang {
+	case GOLANG:
+		return createContestsProblemsForGo(problems, contestID)
+	case RUST:
+		return createContestsProblemsForRust(problems, contestID)
+	default:
+		return fmt.Errorf("unsupported lang: %q", lang)
 	}
-	return nil
 }
 
-func fetchHTML(url string) ([]byte, error) {
-	response, err := http.Get(url)
+func fetchHTML(url, contestID string) ([]byte, error) {
+	response, err := httpClient.Get(url)
 	if err != nil {
 		return nil, err
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("oops. %s not started yet", contest)
+		return nil, fmt.Errorf("oops. %s not started yet", contestID)
 	}
-	html, err := io.ReadAll(response.Body)
-	return html, err
+	return io.ReadAll(response.Body)
 }
 
-// 获取题目信息
-func extractTasks(body []byte) []Problem {
+func extractTasks(body []byte, contestID string) []Problem {
 	problems := []Problem{}
 	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
 	if err != nil {
 		return problems
 	}
-	// 查找任务表格并提取信息
+	currentDate := time.Now().Format("20060102")
 	doc.Find("table tbody tr").Each(func(i int, s *goquery.Selection) {
 		taskLink := s.Find("td a").Eq(0).AttrOr("href", "")
 		taskID := s.Find("td a").Eq(0).Text()
 		taskName := s.Find("td").Eq(1).Text()
-		currentDate := time.Now().Format("20060102")
-		problems = append(problems, Problem{ID: taskID, ContestID: contest, Title: fmt.Sprintf("%s.%s", taskID, taskName), URL: fmt.Sprintf("%s%s", _Atcoder_host, taskLink), CurrentDate: currentDate})
+		problems = append(problems, Problem{
+			ID:          taskID,
+			ContestID:   contestID,
+			Title:       fmt.Sprintf("%s.%s", taskID, taskName),
+			URL:         _AtcoderHost + taskLink,
+			CurrentDate: currentDate,
+		})
 	})
 	return problems
 }
 
 func createFile(data []byte, fileName string) error {
-	_, err := os.Stat(fileName)
-	if !os.IsNotExist(err) {
+	if _, err := os.Stat(fileName); err == nil {
 		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("error stating file %s: %v", fileName, err)
 	}
+
 	file, err := os.Create(fileName)
 	if err != nil {
 		return fmt.Errorf("error creating file %s: %v", fileName, err)
 	}
 	defer file.Close()
 
-	_, err = file.Write(data)
-	if err != nil {
+	if _, err := file.Write(data); err != nil {
 		return fmt.Errorf("error writing to file %s: %v", fileName, err)
 	}
-
 	return nil
 }
 
-func createContestsProblemsForGo(problems []Problem, contestsID string) error {
-	if err := os.MkdirAll(contestsID, os.ModePerm); err != nil {
-		return fmt.Errorf("error creating directory %s: %v", contestsID, err)
+func createContestsProblemsForGo(problems []Problem, contestID string) error {
+	if err := os.MkdirAll(contestID, os.ModePerm); err != nil {
+		return fmt.Errorf("error creating directory %s: %v", contestID, err)
 	}
 
-	// Change directory and defer to recover it later
 	originalDir, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("error getting current directory: %v", err)
 	}
 	defer os.Chdir(originalDir)
 
-	if err := os.Chdir(contestsID); err != nil {
-		return fmt.Errorf("error changing directory to %s: %v", contestsID, err)
+	if err := os.Chdir(contestID); err != nil {
+		return fmt.Errorf("error changing directory to %s: %v", contestID, err)
 	}
 
 	for _, prob := range problems {
 		fileName := fmt.Sprintf("%s.go", prob.Title)
 
 		var data strings.Builder
-		tmpl, err := template.New("problem").Parse(_ProblemFileTempForGo)
-		if err != nil {
-			return fmt.Errorf("error parsing template: %v", err)
-		}
-		if err := tmpl.Execute(&data, prob); err != nil {
-			return fmt.Errorf("error executing template: %v", err)
+		if err := RenderProblem(&data, prob, GOLANG); err != nil {
+			return fmt.Errorf("error rendering problem %s: %v", prob.ID, err)
 		}
 
 		if err := createFile([]byte(data.String()), fileName); err != nil {
@@ -155,53 +168,46 @@ func createContestsProblemsForGo(problems []Problem, contestsID string) error {
 		}
 	}
 
-	cmd := exec.Command("gofmt", "-w", ".")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("error running gofmt: %v", err)
+	if _, err := exec.LookPath("gofmt"); err == nil {
+		if err := exec.Command("gofmt", "-w", ".").Run(); err != nil {
+			return fmt.Errorf("error running gofmt: %v", err)
+		}
 	}
-
 	return nil
 }
 
-func createContestsProblemsForRust(problems []Problem, contestsID string) error {
-	fileName := fmt.Sprintf("%s.rs", contestsID)
-	fileContent := []byte{}
+func createContestsProblemsForRust(problems []Problem, contestID string) error {
+	fileName := fmt.Sprintf("%s.rs", contestID)
+	var content strings.Builder
 	for _, prob := range problems {
-		var data strings.Builder
-		tmpl, err := template.New("problem").Parse(_ProblemFileTempForRust)
-		if err != nil {
-			return fmt.Errorf("error parsing template: %v", err)
-		}
 		prob.ID = strings.ToLower(prob.ID)
-		if err := tmpl.Execute(&data, prob); err != nil {
-			return fmt.Errorf("error executing template: %v", err)
+		if err := RenderProblem(&content, prob, RUST); err != nil {
+			return fmt.Errorf("error rendering problem %s: %v", prob.ID, err)
 		}
-		fileContent = append(fileContent, []byte(data.String())...)
 	}
-	if err := createFile(fileContent, fileName); err != nil {
+	if err := createFile([]byte(content.String()), fileName); err != nil {
 		return fmt.Errorf("error creating problem file %s: %v", fileName, err)
 	}
 
-	cmd := exec.Command("rustfmt", fileName)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("error running gofmt: %v", err)
+	if _, err := exec.LookPath("rustfmt"); err == nil {
+		if err := exec.Command("rustfmt", fileName).Run(); err != nil {
+			return fmt.Errorf("error running rustfmt: %v", err)
+		}
 	}
-
 	return nil
 }
 
 func CheckValidDir() {
-	if !isAtcoderDirectory() {
-		var userResponse string
-		fmt.Print("not an Atcoder directory, continue? (y/n): ")
-		fmt.Scanln(&userResponse)
-
-		if userResponse != _Yes {
-			fmt.Println("Exiting the program.")
-			os.Exit(0)
-		}
+	if isAtcoderDirectory() {
+		return
 	}
-
+	var userResponse string
+	fmt.Print("not an Atcoder directory, continue? (y/n): ")
+	fmt.Scanln(&userResponse)
+	if userResponse != _Yes {
+		fmt.Println("Exiting the program.")
+		os.Exit(0)
+	}
 }
 
 func isAtcoderDirectory() bool {
@@ -210,6 +216,5 @@ func isAtcoderDirectory() bool {
 		fmt.Println("Error getting current directory:", err)
 		return false
 	}
-
-	return strings.HasSuffix(currentDir, "/atcoder")
+	return filepath.Base(currentDir) == "atcoder"
 }

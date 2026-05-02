@@ -1,6 +1,3 @@
-/*
-Copyright © 2025 NAME HERE <EMAIL ADDRESS>
-*/
 package cmd
 
 import (
@@ -10,11 +7,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// atcoderRustCmd represents the atcoderRust command
 var atcoderRustCmd = &cobra.Command{
 	Use:   "acr",
-	Short: "Fetch algorithm problems and create problem file for rust.",
-	Long:  "This command pulls algorithm problems based on the contest ID, generates a file, and creates algorithm solution files within it. Example usage: sinit acr -c=abc375",
+	Short: "Fetch AtCoder problems and scaffold a Rust source file for a contest.",
+	Long:  "This command pulls algorithm problems based on the contest ID and writes a single .rs file with one stub function per problem. Example: sinit acr -c=abc375",
 	Run: func(cmd *cobra.Command, args []string) {
 		atcoder.CheckValidDir()
 		if contestsID == "" {
