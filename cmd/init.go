@@ -19,7 +19,7 @@ var initCmd = &cobra.Command{
 	Long:  `Removes the existing .git directory in the target project, re-initializes a new repository, configures the local user.name/user.email, and creates an initial commit. Example: sinit init -p=./my-project -u=alice -e=alice@example.com`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := project.InitProject(projectPath, username, email); err != nil {
-			fmt.Printf("Init error: %v\n", err)
+			fmt.Println("Init error:", err)
 			return
 		}
 		fmt.Println("Project init successfully!")

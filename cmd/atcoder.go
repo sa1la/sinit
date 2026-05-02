@@ -7,28 +7,43 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var atcoderCmd = &cobra.Command{
-	Use:   "ac",
-	Short: "Fetch algorithm problems and create directory structure for a contest. BTW, this is for golang.",
-	Long:  `This command pulls algorithm problems based on the contest ID, generates a folder, and creates algorithm solution files within it. Example usage: sinit ac -c=abc375`,
-	Run: func(cmd *cobra.Command, args []string) {
-		atcoder.CheckValidDir()
-		if contestsID == "" {
-			fmt.Print("which contest?(etc: abc133/arc101): ")
-			fmt.Scanln(&contestsID)
-		}
-		fmt.Println("creating...")
-		if err := atcoder.CreateContestsTasks(contestsID, atcoder.GOLANG); err != nil {
-			fmt.Printf("%v\n", err)
-			return
-		}
-		fmt.Println("let's go.")
-	},
+func newAtcoderCmd(use, short, long string, lang atcoder.Lang) *cobra.Command {
+	var contestID string
+	cmd := &cobra.Command{
+		Use:   use,
+		Short: short,
+		Long:  long,
+		Run: func(cmd *cobra.Command, args []string) {
+			if !atcoder.CheckValidDir() {
+				return
+			}
+			if contestID == "" {
+				fmt.Print("which contest?(etc: abc133/arc101): ")
+				fmt.Scanln(&contestID)
+			}
+			fmt.Println("creating...")
+			if err := atcoder.CreateContestsTasks(contestID, lang); err != nil {
+				fmt.Println(err)
+				return
+			}
+			fmt.Println("let's go.")
+		},
+	}
+	cmd.Flags().StringVarP(&contestID, "contest", "c", "", "-c=abc376")
+	return cmd
 }
-var contestsID string
 
 func init() {
-	rootCmd.AddCommand(atcoderCmd)
-
-	atcoderCmd.PersistentFlags().StringVarP(&contestsID, "contest", "c", "", "-c=abc376")
+	rootCmd.AddCommand(newAtcoderCmd(
+		"ac",
+		"Fetch algorithm problems and create directory structure for a contest. BTW, this is for golang.",
+		"This command pulls algorithm problems based on the contest ID, generates a folder, and creates algorithm solution files within it. Example usage: sinit ac -c=abc375",
+		atcoder.LangGo,
+	))
+	rootCmd.AddCommand(newAtcoderCmd(
+		"acr",
+		"Fetch AtCoder problems and scaffold a Rust source file for a contest.",
+		"This command pulls algorithm problems based on the contest ID and writes a single .rs file with one stub function per problem. Example: sinit acr -c=abc375",
+		atcoder.LangRust,
+	))
 }

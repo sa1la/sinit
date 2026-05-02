@@ -4,36 +4,31 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 )
 
 func InitProject(projectName, username, email string) error {
-	originalDir, err := os.Getwd()
+	projectPath, err := filepath.Abs(projectName)
 	if err != nil {
-		return fmt.Errorf("error getting current directory: %v", err)
-	}
-	defer os.Chdir(originalDir)
-
-	if err := os.Chdir(projectName); err != nil {
-		return fmt.Errorf("error changing directory to %s: %v", projectName, err)
+		return fmt.Errorf("resolve %s: %w", projectName, err)
 	}
 
-	if err := os.RemoveAll(".git"); err != nil {
-		return fmt.Errorf("error removing git history: %v", err)
+	if err := os.RemoveAll(filepath.Join(projectPath, ".git")); err != nil {
+		return fmt.Errorf("remove .git: %w", err)
 	}
 
-	steps := []struct {
-		name string
-		args []string
-	}{
-		{"git", []string{"init"}},
-		{"git", []string{"config", "--local", "user.name", username}},
-		{"git", []string{"config", "--local", "user.email", email}},
-		{"git", []string{"add", "."}},
-		{"git", []string{"commit", "-m", "Initial commit"}},
+	steps := [][]string{
+		{"init"},
+		{"config", "--local", "user.name", username},
+		{"config", "--local", "user.email", email},
+		{"add", "."},
+		{"commit", "-m", "Initial commit"},
 	}
-	for _, s := range steps {
-		if err := exec.Command(s.name, s.args...).Run(); err != nil {
-			return fmt.Errorf("error running %s %v: %v", s.name, s.args, err)
+	for _, args := range steps {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = projectPath
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("run git %v: %w", args, err)
 		}
 	}
 	return nil
