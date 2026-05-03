@@ -3,10 +3,12 @@ package runner
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -47,9 +49,6 @@ func Run(opts Options) ([]Result, error) {
 	default:
 		return nil, fmt.Errorf("unsupported lang: %q", opts.Lang)
 	}
-	if _, err := os.Stat(testdataDir); os.IsNotExist(err) {
-		return nil, fmt.Errorf("no testdata found; run `sinit ac` (Go) or `sinit acr` (Rust) to fetch samples")
-	}
 
 	pattern := filepath.Join(testdataDir, strings.ToLower(opts.ProblemID)+"_*.in")
 	inFiles, err := filepath.Glob(pattern)
@@ -57,7 +56,7 @@ func Run(opts Options) ([]Result, error) {
 		return nil, fmt.Errorf("glob testdata: %w", err)
 	}
 	if len(inFiles) == 0 {
-		return nil, fmt.Errorf("no test inputs found for problem %s", opts.ProblemID)
+		return nil, fmt.Errorf("no testdata found; run `sinit ac` (Go) or `sinit acr` (Rust) to fetch samples")
 	}
 
 	var binary string
@@ -130,47 +129,50 @@ func compileGo(opts Options) (string, func(), error) {
 		return "", nil, fmt.Errorf("go not found in PATH")
 	}
 
-	goPattern := filepath.Join(opts.WorkDir, opts.ContestID, strings.ToUpper(opts.ProblemID)+".*.go")
-	matches, err := filepath.Glob(goPattern)
-	if err != nil {
-		return "", nil, fmt.Errorf("glob source: %w", err)
-	}
-	if len(matches) == 0 {
-		return "", nil, fmt.Errorf("source file for problem %s not found in %s", opts.ProblemID, opts.WorkDir)
-	}
-	srcFile := matches[0]
-
 	tmpDir, err := os.MkdirTemp("", "sinit-run-*")
 	if err != nil {
 		return "", nil, fmt.Errorf("mkdirtemp: %w", err)
 	}
 	cleanup := func() { os.RemoveAll(tmpDir) }
 
-	src, err := os.ReadFile(srcFile)
-	if err != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("read source: %w", err)
-	}
-	srcStr := string(src)
-	lines := strings.Split(srcStr, "\n")
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "package ") {
-			lines[i] = "package main"
-			break
+	gollectBin, gollectErr := exec.LookPath("gollect")
+	if gollectErr == nil {
+		bundlePath, err := BundleGo(opts, tmpDir, gollectBin)
+		if err != nil {
+			cleanup()
+			return "", nil, err
 		}
-	}
-	rewritten := strings.Join(lines, "\n")
-	solveFile := filepath.Join(tmpDir, "solve.go")
-	if err := os.WriteFile(solveFile, []byte(rewritten), 0o644); err != nil {
-		cleanup()
-		return "", nil, err
+
+		buildDir := filepath.Join(tmpDir, "build")
+		if err := os.MkdirAll(buildDir, 0o755); err != nil {
+			cleanup()
+			return "", nil, fmt.Errorf("mkdir build: %w", err)
+		}
+		finalSrc := filepath.Join(buildDir, "main.go")
+		if err := os.Rename(bundlePath, finalSrc); err != nil {
+			cleanup()
+			return "", nil, fmt.Errorf("move bundle: %w", err)
+		}
+
+		compileCtx, compileCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer compileCancel()
+
+		compileCmd := exec.CommandContext(compileCtx, "go", "build", "-o", "run", finalSrc)
+		compileCmd.Dir = buildDir
+
+		if out, err := compileCmd.CombinedOutput(); err != nil {
+			cleanup()
+			if compileCtx.Err() == context.DeadlineExceeded {
+				return "", nil, fmt.Errorf("compilation timeout")
+			}
+			return "", nil, fmt.Errorf("compile: %s", out)
+		}
+
+		return filepath.Join(buildDir, "run"), cleanup, nil
 	}
 
-	solveFunc := "Solve" + strings.ToUpper(opts.ProblemID)
-	wrapper := fmt.Sprintf("package main\n\nfunc main() {\n\t%s()\n}\n", solveFunc)
-	mainFile := filepath.Join(tmpDir, "main.go")
-	if err := os.WriteFile(mainFile, []byte(wrapper), 0o644); err != nil {
+	// Fallback path: standard go mod init/tidy/build for environments without gollect.
+	if err := stageGoSource(opts, tmpDir); err != nil {
 		cleanup()
 		return "", nil, err
 	}
@@ -192,7 +194,10 @@ func compileGo(opts Options) (string, func(), error) {
 	compileCtx, compileCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer compileCancel()
 
-	compileCmd := exec.CommandContext(compileCtx, "go", "build", "-o", "run", solveFile, mainFile)
+	compileCmd := exec.CommandContext(compileCtx, "go", "build", "-o", "run",
+		filepath.Join(tmpDir, "solve.go"),
+		filepath.Join(tmpDir, "main.go"),
+	)
 	compileCmd.Dir = tmpDir
 
 	if out, err := compileCmd.CombinedOutput(); err != nil {
@@ -214,18 +219,12 @@ func compileRust(opts Options) (string, func(), error) {
 		return "", nil, fmt.Errorf("cargo not found in PATH")
 	}
 
-	cargoRoot, err := findCargoRoot(opts.WorkDir)
+	cargoRoot, err := findMarkerUpward(opts.WorkDir, "Cargo.toml")
 	if err != nil {
 		return "", nil, err
 	}
 
 	srcFile := filepath.Join(opts.WorkDir, opts.ContestID+".rs")
-	if _, err := os.Stat(srcFile); err != nil {
-		if os.IsNotExist(err) {
-			return "", nil, fmt.Errorf("source file %s not found", srcFile)
-		}
-		return "", nil, fmt.Errorf("stat source: %w", err)
-	}
 
 	examplesDir := filepath.Join(cargoRoot, "examples")
 	if err := os.MkdirAll(examplesDir, 0o755); err != nil {
@@ -264,18 +263,143 @@ fn main() {
 	return binary, cleanup, nil
 }
 
-func findCargoRoot(startDir string) (string, error) {
+func findMarkerUpward(startDir, marker string) (string, error) {
 	dir := startDir
 	for {
-		if _, err := os.Stat(filepath.Join(dir, "Cargo.toml")); err == nil {
+		if _, err := os.Stat(filepath.Join(dir, marker)); err == nil {
 			return dir, nil
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", fmt.Errorf("Cargo.toml not found above %s", startDir)
+			return "", fmt.Errorf("%s not found above %s", marker, startDir)
 		}
 		dir = parent
 	}
+}
+
+func rewritePackageMain(src string) string {
+	lines := strings.Split(src, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "package ") {
+			lines[i] = "package main"
+			return strings.Join(lines, "\n")
+		}
+	}
+	return src
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
+}
+
+var (
+	cachedGoVersion string
+	goVersionOnce   sync.Once
+)
+
+func goVersion() string {
+	goVersionOnce.Do(func() {
+		out, err := exec.Command("go", "env", "GOVERSION").Output()
+		if err == nil {
+			cachedGoVersion = strings.TrimPrefix(strings.TrimSpace(string(out)), "go")
+		} else {
+			cachedGoVersion = "1.21"
+		}
+	})
+	return cachedGoVersion
+}
+
+func solveFuncName(opts Options) string {
+	return "Solve" + strings.ToUpper(opts.ProblemID)
+}
+
+func writeMainGo(path, solveFunc string) error {
+	wrapper := fmt.Sprintf("package main\n\nfunc main() {\n\t%s()\n}\n", solveFunc)
+	return os.WriteFile(path, []byte(wrapper), 0o644)
+}
+
+func findGoSource(opts Options) (string, error) {
+	goPattern := filepath.Join(opts.WorkDir, opts.ContestID, strings.ToUpper(opts.ProblemID)+".*.go")
+	matches, err := filepath.Glob(goPattern)
+	if err != nil {
+		return "", fmt.Errorf("glob source: %w", err)
+	}
+	if len(matches) == 0 {
+		return "", fmt.Errorf("source file for problem %s not found in %s", opts.ProblemID, opts.WorkDir)
+	}
+	if len(matches) > 1 {
+		return "", fmt.Errorf("ambiguous: multiple source files match for problem %s: %v", opts.ProblemID, matches)
+	}
+	return matches[0], nil
+}
+
+// stageGoSource locates the problem's Go source, rewrites its package
+// declaration to "main", and writes both solve.go and main.go into dir.
+func stageGoSource(opts Options, dir string) error {
+	srcFile, err := findGoSource(opts)
+	if err != nil {
+		return err
+	}
+	src, err := os.ReadFile(srcFile)
+	if err != nil {
+		return fmt.Errorf("read source: %w", err)
+	}
+	rewritten := rewritePackageMain(string(src))
+	if err := os.WriteFile(filepath.Join(dir, "solve.go"), []byte(rewritten), 0o644); err != nil {
+		return err
+	}
+	if err := writeMainGo(filepath.Join(dir, "main.go"), solveFuncName(opts)); err != nil {
+		return err
+	}
+	return nil
+}
+
+// BundleGo generates a self-contained single-file Go bundle for the given
+// problem using gollect. It stages solve.go, main.go and a go.mod inside
+// stageDir, runs gollect, and returns the path to the produced bundle file.
+func BundleGo(opts Options, stageDir string, gollectBin string) (string, error) {
+	if err := stageGoSource(opts, stageDir); err != nil {
+		return "", err
+	}
+
+	// Copy the user's go.mod/go.sum so gollect resolves the same module versions.
+	// Note: replace directives in the user's go.mod may break gollect inlining.
+	userGoMod, goModErr := findMarkerUpward(opts.WorkDir, "go.mod")
+	if goModErr == nil {
+		if err := copyFile(filepath.Join(userGoMod, "go.mod"), filepath.Join(stageDir, "go.mod")); err != nil {
+			return "", fmt.Errorf("copy go.mod: %w", err)
+		}
+		if err := copyFile(filepath.Join(userGoMod, "go.sum"), filepath.Join(stageDir, "go.sum")); err != nil {
+			if !os.IsNotExist(err) {
+				return "", fmt.Errorf("copy go.sum: %w", err)
+			}
+		}
+	} else {
+		if err := os.WriteFile(filepath.Join(stageDir, "go.mod"), []byte(fmt.Sprintf("module sinit-run\n\ngo %s\n", goVersion())), 0o644); err != nil {
+			return "", err
+		}
+	}
+
+	bundlePath := filepath.Join(stageDir, "bundle.go")
+	gollectCmd := exec.Command(gollectBin, "-in", "*.go", "-out", bundlePath)
+	gollectCmd.Dir = stageDir
+	if out, err := gollectCmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("gollect: %s", out)
+	}
+
+	return bundlePath, nil
 }
 
 // warmUp runs the binary once and discards the result, priming the OS page

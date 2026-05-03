@@ -308,3 +308,140 @@ path = "src/main.rs"
 		t.Errorf("wrapper %s not cleaned up after Run (err=%v)", wrapperPath, err)
 	}
 }
+
+func TestBundleGo_StdlibOnly(t *testing.T) {
+	gollectBin, err := exec.LookPath("gollect")
+	if err != nil {
+		t.Skip("gollect not found in PATH")
+	}
+
+	tmp := t.TempDir()
+
+	contestDir := filepath.Join(tmp, "abc375")
+	if err := os.MkdirAll(contestDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	src := `package abc375
+
+import "fmt"
+
+func SolveA() {
+	fmt.Println(42)
+}
+`
+	if err := os.WriteFile(filepath.Join(contestDir, "A.Test.go"), []byte(src), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	stageDir := t.TempDir()
+	opts := Options{
+		Lang:      LangGo,
+		ContestID: "abc375",
+		ProblemID: "a",
+		WorkDir:   tmp,
+	}
+
+	bundlePath, err := BundleGo(opts, stageDir, gollectBin)
+	if err != nil {
+		t.Fatalf("BundleGo: %v", err)
+	}
+
+	if _, err := os.Stat(bundlePath); err != nil {
+		t.Fatalf("bundle not found: %v", err)
+	}
+
+	// Verify the bundle compiles standalone.
+	compileCmd := exec.Command("go", "build", bundlePath)
+	if out, err := compileCmd.CombinedOutput(); err != nil {
+		t.Fatalf("compile bundle: %v\n%s", err, out)
+	}
+}
+
+func TestBundleGo_CopiesUserGoMod(t *testing.T) {
+	gollectBin, err := exec.LookPath("gollect")
+	if err != nil {
+		t.Skip("gollect not found in PATH")
+	}
+
+	tmp := t.TempDir()
+
+	contestDir := filepath.Join(tmp, "abc375")
+	if err := os.MkdirAll(contestDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	src := `package abc375
+
+import "fmt"
+
+func SolveA() {
+	fmt.Println(42)
+}
+`
+	if err := os.WriteFile(filepath.Join(contestDir, "A.Test.go"), []byte(src), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	// Write a user go.mod in the work dir so BundleGo copies it.
+	goMod := `module sinit-test
+
+go 1.21
+`
+	if err := os.WriteFile(filepath.Join(tmp, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+
+	stageDir := t.TempDir()
+	opts := Options{
+		Lang:      LangGo,
+		ContestID: "abc375",
+		ProblemID: "a",
+		WorkDir:   tmp,
+	}
+
+	bundlePath, err := BundleGo(opts, stageDir, gollectBin)
+	if err != nil {
+		t.Fatalf("BundleGo: %v", err)
+	}
+
+	if _, err := os.Stat(bundlePath); err != nil {
+		t.Fatalf("bundle not found: %v", err)
+	}
+
+	// Verify the copied go.mod was staged.
+	stagedGoMod := filepath.Join(stageDir, "go.mod")
+	if _, err := os.Stat(stagedGoMod); err != nil {
+		t.Fatalf("staged go.mod not found: %v", err)
+	}
+	data, err := os.ReadFile(stagedGoMod)
+	if err != nil {
+		t.Fatalf("read staged go.mod: %v", err)
+	}
+	if string(data) != goMod {
+		t.Errorf("staged go.mod = %q, want %q", string(data), goMod)
+	}
+}
+
+func TestBundleGo_MissingSource(t *testing.T) {
+	gollectBin, err := exec.LookPath("gollect")
+	if err != nil {
+		t.Skip("gollect not found in PATH")
+	}
+
+	tmp := t.TempDir()
+
+	// No source file created — BundleGo should fail.
+	stageDir := t.TempDir()
+	opts := Options{
+		Lang:      LangGo,
+		ContestID: "abc375",
+		ProblemID: "a",
+		WorkDir:   tmp,
+	}
+
+	_, err = BundleGo(opts, stageDir, gollectBin)
+	if err == nil {
+		t.Fatal("BundleGo: expected error for missing source, got nil")
+	}
+}
