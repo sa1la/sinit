@@ -245,11 +245,10 @@ func createContestsProblems(problems []Problem, contestID string, entry langEntr
 	var formatTarget string
 	created := false
 
-	if err := os.MkdirAll(contestID, os.ModePerm); err != nil {
-		return fmt.Errorf("mkdir %s: %w", contestID, err)
-	}
-
 	if entry.spec.perProblem {
+		if err := os.MkdirAll(contestID, os.ModePerm); err != nil {
+			return fmt.Errorf("mkdir %s: %w", contestID, err)
+		}
 		for _, prob := range problems {
 			p := prob
 			p.ID = entry.spec.transformID(prob.ID)
@@ -266,7 +265,7 @@ func createContestsProblems(problems []Problem, contestID string, entry langEntr
 		}
 		formatTarget = contestID
 	} else {
-		fileName := filepath.Join(contestID, fmt.Sprintf("%s.%s", contestID, entry.spec.ext))
+		fileName := fmt.Sprintf("%s.%s", contestID, entry.spec.ext)
 		var content strings.Builder
 		for _, prob := range problems {
 			p := prob
@@ -283,7 +282,7 @@ func createContestsProblems(problems []Problem, contestID string, entry langEntr
 		formatTarget = fileName
 	}
 
-	if err := writeAllProblemSamples(problems, force); err != nil {
+	if err := writeAllProblemSamples(problems, entry.spec.perProblem, force); err != nil {
 		return err
 	}
 
@@ -293,13 +292,18 @@ func createContestsProblems(problems []Problem, contestID string, entry langEntr
 	return runFormatter(entry.spec.formatter, entry.spec.formatArgs(formatTarget))
 }
 
-func writeProblemSamples(prob Problem, force bool) error {
+func writeProblemSamples(prob Problem, perProblem bool, force bool) error {
 	samples, err := ExtractSamples(prob.URL)
 	if err != nil {
 		return err
 	}
 
-	testdataDir := filepath.Join(prob.ContestID, "testdata")
+	var testdataDir string
+	if perProblem {
+		testdataDir = filepath.Join(prob.ContestID, "testdata")
+	} else {
+		testdataDir = prob.ContestID
+	}
 	if err := os.MkdirAll(testdataDir, os.ModePerm); err != nil {
 		return fmt.Errorf("mkdir %s: %w", testdataDir, err)
 	}
@@ -321,14 +325,14 @@ func writeProblemSamples(prob Problem, force bool) error {
 	return nil
 }
 
-func writeAllProblemSamples(problems []Problem, force bool) error {
+func writeAllProblemSamples(problems []Problem, perProblem bool, force bool) error {
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(problems))
 	for _, prob := range problems {
 		wg.Add(1)
 		go func(p Problem) {
 			defer wg.Done()
-			if err := writeProblemSamples(p, force); err != nil {
+			if err := writeProblemSamples(p, perProblem, force); err != nil {
 				errCh <- err
 			}
 		}(prob)

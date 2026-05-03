@@ -56,11 +56,11 @@ The core flow for `ac`/`acr`:
 
 **Sample Extraction**
 
-Samples are discovered by scanning `<h3>` tags for "Sample Input" / "Sample Output" text and reading the next `<pre>` sibling. HTML entities **must** be decoded (`html.UnescapeString`) — un-decoded entities in extracted text was a prior bug (commit `22abb37`). Samples are written to `testdata/<problem>_<n>.in` and `.out`.
+Samples are discovered by scanning `<h3>` tags for "Sample Input" / "Sample Output" text and reading the next `<pre>` sibling. HTML entities **must** be decoded (`html.UnescapeString`) — un-decoded entities in extracted text was a prior bug (commit `22abb37`). Samples are written to `CONTESTID/testdata/<problem>_<n>.in` and `.out` (Go) or `CONTESTID/<problem>_<n>.in` and `.out` (Rust).
 
 ### Local Testing Runner (`utils/runner/`)
 
-`runner.Run` discovers all `testdata/PROBLEM_*.in` files, compiles the solution, runs each input through the binary, and compares stdout against the corresponding `.out` file.
+`runner.Run` discovers all `CONTESTID/testdata/PROBLEM_*.in` files (Go) or `CONTESTID/PROBLEM_*.in` files (Rust), compiles the solution, runs each input through the binary, and compares stdout against the corresponding `.out` file.
 
 **Go Compilation Strategy**
 
@@ -96,5 +96,6 @@ Simple `git` command orchestration: `rm -rf .git`, then `git init`, `config`, `a
 ## File/Directory Conventions
 
 - AtCoder commands expect to run inside a directory whose basename (or parent basename) is `atcoder`. `CheckValidDir` prompts for confirmation otherwise.
-- Contest output goes into `./CONTESTID/` with `testdata/` inside it.
-- Sample files: `testdata/{problem}_{n}.in` / `.out`. User-added custom cases can use any suffix matching `testdata/{problem}_*.in`.
+- Go contest output goes into `./CONTESTID/` with one `.go` file per problem; samples live in `./CONTESTID/testdata/`.
+- Rust contest output is a single `./CONTESTID.rs` file in the atcoder root; samples live in `./CONTESTID/` (a directory sibling to the `.rs` file).
+- Sample files: `{problem}_{n}.in` / `.out`. All `*.in` and `*.out` files are gitignored.

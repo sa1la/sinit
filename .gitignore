@@ -3,3 +3,7 @@
 sinit
 
 docs
+
+# AtCoder sample testdata files
+*.in
+*.out

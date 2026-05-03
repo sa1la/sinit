@@ -48,7 +48,7 @@ func init() {
 				contestDir = filepath.Join(wd, contestID)
 			}
 
-			lang := detectLang(contestDir, contestID, problem)
+			lang := detectLang(wd, contestDir, contestID, problem)
 			if lang == "" {
 				fmt.Printf("Error: could not detect language for problem %s\n", problem)
 				return
@@ -58,7 +58,7 @@ func init() {
 				Lang:      lang,
 				ContestID: contestID,
 				ProblemID: problem,
-				WorkDir:   contestDir,
+				WorkDir:   wd,
 			}
 
 			results, err := runner.Run(opts)
@@ -94,13 +94,17 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 }
 
-func detectLang(contestDir, contestID, problemID string) runner.Lang {
+func detectLang(wd, contestDir, contestID, problemID string) runner.Lang {
 	goPattern := filepath.Join(contestDir, strings.ToUpper(problemID)+".*.go")
-	if matches, _ := filepath.Glob(goPattern); len(matches) > 0 {
+	matches, err := filepath.Glob(goPattern)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: glob pattern %q: %v\n", goPattern, err)
+	}
+	if len(matches) > 0 {
 		return runner.LangGo
 	}
 
-	rsFile := filepath.Join(contestDir, contestID+".rs")
+	rsFile := filepath.Join(wd, contestID+".rs")
 	if _, err := os.Stat(rsFile); err == nil {
 		return runner.LangRust
 	}

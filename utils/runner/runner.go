@@ -35,9 +35,17 @@ type Result struct {
 
 // Run discovers all testdata samples for the problem and executes them.
 func Run(opts Options) ([]Result, error) {
-	testdataDir := filepath.Join(opts.WorkDir, "testdata")
+	var testdataDir string
+	switch opts.Lang {
+	case LangGo:
+		testdataDir = filepath.Join(opts.WorkDir, opts.ContestID, "testdata")
+	case LangRust:
+		testdataDir = filepath.Join(opts.WorkDir, opts.ContestID)
+	default:
+		return nil, fmt.Errorf("unsupported lang: %q", opts.Lang)
+	}
 	if _, err := os.Stat(testdataDir); os.IsNotExist(err) {
-		return nil, fmt.Errorf("no testdata directory found; run `sinit ac` to fetch samples")
+		return nil, fmt.Errorf("no testdata found; run `sinit ac` (Go) or `sinit acr` (Rust) to fetch samples")
 	}
 
 	pattern := filepath.Join(testdataDir, strings.ToLower(opts.ProblemID)+"_*.in")
@@ -116,7 +124,7 @@ func compileGo(opts Options) (string, string, error) {
 		return "", "", fmt.Errorf("go not found in PATH")
 	}
 
-	goPattern := filepath.Join(opts.WorkDir, strings.ToUpper(opts.ProblemID)+".*.go")
+	goPattern := filepath.Join(opts.WorkDir, opts.ContestID, strings.ToUpper(opts.ProblemID)+".*.go")
 	matches, err := filepath.Glob(goPattern)
 	if err != nil {
 		return "", "", fmt.Errorf("glob source: %w", err)
@@ -224,7 +232,7 @@ func compileRust(opts Options) (string, string, error) {
 	compileCtx, compileCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer compileCancel()
 
-	compileCmd := exec.CommandContext(compileCtx, "rustc", "main.rs", opts.ContestID+".rs", "-o", "run")
+	compileCmd := exec.CommandContext(compileCtx, "rustc", "main.rs", "-o", "run")
 	compileCmd.Dir = tmpDir
 
 	if out, err := compileCmd.CombinedOutput(); err != nil {

@@ -2,6 +2,7 @@ package runner
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -47,7 +48,7 @@ func SolveA() {
 		Lang:      LangGo,
 		ContestID: "abc375",
 		ProblemID: "a",
-		WorkDir:   contestDir,
+		WorkDir:   tmp,
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -105,7 +106,7 @@ func SolveA() {
 		Lang:      LangGo,
 		ContestID: "abc375",
 		ProblemID: "a",
-		WorkDir:   contestDir,
+		WorkDir:   tmp,
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -157,7 +158,7 @@ func SolveA() { fmt.Println(42) }
 		Lang:      LangGo,
 		ContestID: "abc375",
 		ProblemID: "a",
-		WorkDir:   contestDir,
+		WorkDir:   tmp,
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -210,7 +211,7 @@ func SolveA() {
 		Lang:      LangGo,
 		ContestID: "abc375",
 		ProblemID: "a",
-		WorkDir:   contestDir,
+		WorkDir:   tmp,
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -226,5 +227,59 @@ func SolveA() {
 	}
 	if res.Error != "timeout" {
 		t.Errorf("Error = %q, want timeout", res.Error)
+	}
+}
+
+func TestRun_RustPass(t *testing.T) {
+	if _, err := exec.LookPath("rustc"); err != nil {
+		t.Skip("rustc not found in PATH")
+	}
+
+	tmp := t.TempDir()
+
+	src := `pub fn solve_a() {
+	let mut input = String::new();
+	std::io::stdin().read_line(&mut input).unwrap();
+	let n: i32 = input.trim().parse().unwrap();
+	println!("{}", n * 2);
+}
+`
+	srcFile := filepath.Join(tmp, "abc375.rs")
+	if err := os.WriteFile(srcFile, []byte(src), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	testdataDir := filepath.Join(tmp, "abc375")
+	if err := os.MkdirAll(testdataDir, 0o755); err != nil {
+		t.Fatalf("mkdir testdata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(testdataDir, "a_1.in"), []byte("5\n"), 0o644); err != nil {
+		t.Fatalf("write in: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(testdataDir, "a_1.out"), []byte("10\n"), 0o644); err != nil {
+		t.Fatalf("write out: %v", err)
+	}
+
+	results, err := Run(Options{
+		Lang:      LangRust,
+		ContestID: "abc375",
+		ProblemID: "a",
+		WorkDir:   tmp,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("len(results) = %d, want 1", len(results))
+	}
+
+	res := results[0]
+	if !res.Passed {
+		t.Errorf("Passed = false, want true; Actual=%q Expected=%q Error=%q",
+			res.Actual, res.Expected, res.Error)
+	}
+	if res.SampleName != "a_1" {
+		t.Errorf("SampleName = %q, want a_1", res.SampleName)
 	}
 }
