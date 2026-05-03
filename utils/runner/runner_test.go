@@ -310,11 +310,6 @@ path = "src/main.rs"
 }
 
 func TestBundleGo_StdlibOnly(t *testing.T) {
-	gollectBin, err := exec.LookPath("gollect")
-	if err != nil {
-		t.Skip("gollect not found in PATH")
-	}
-
 	tmp := t.TempDir()
 
 	contestDir := filepath.Join(tmp, "abc375")
@@ -342,7 +337,7 @@ func SolveA() {
 		WorkDir:   tmp,
 	}
 
-	bundlePath, err := BundleGo(opts, stageDir, gollectBin)
+	bundlePath, err := BundleGo(opts, stageDir)
 	if err != nil {
 		t.Fatalf("BundleGo: %v", err)
 	}
@@ -359,11 +354,6 @@ func SolveA() {
 }
 
 func TestBundleGo_CopiesUserGoMod(t *testing.T) {
-	gollectBin, err := exec.LookPath("gollect")
-	if err != nil {
-		t.Skip("gollect not found in PATH")
-	}
-
 	tmp := t.TempDir()
 
 	contestDir := filepath.Join(tmp, "abc375")
@@ -400,7 +390,7 @@ go 1.21
 		WorkDir:   tmp,
 	}
 
-	bundlePath, err := BundleGo(opts, stageDir, gollectBin)
+	bundlePath, err := BundleGo(opts, stageDir)
 	if err != nil {
 		t.Fatalf("BundleGo: %v", err)
 	}
@@ -424,11 +414,6 @@ go 1.21
 }
 
 func TestBundleGo_MissingSource(t *testing.T) {
-	gollectBin, err := exec.LookPath("gollect")
-	if err != nil {
-		t.Skip("gollect not found in PATH")
-	}
-
 	tmp := t.TempDir()
 
 	// No source file created — BundleGo should fail.
@@ -440,7 +425,7 @@ func TestBundleGo_MissingSource(t *testing.T) {
 		WorkDir:   tmp,
 	}
 
-	_, err = BundleGo(opts, stageDir, gollectBin)
+	_, err := BundleGo(opts, stageDir)
 	if err == nil {
 		t.Fatal("BundleGo: expected error for missing source, got nil")
 	}

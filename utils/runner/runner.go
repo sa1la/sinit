@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/murosan/gollect"
 )
 
 type Lang string
@@ -135,70 +137,28 @@ func compileGo(opts Options) (string, func(), error) {
 	}
 	cleanup := func() { os.RemoveAll(tmpDir) }
 
-	gollectBin, gollectErr := exec.LookPath("gollect")
-	if gollectErr == nil {
-		bundlePath, err := BundleGo(opts, tmpDir, gollectBin)
-		if err != nil {
-			cleanup()
-			return "", nil, err
-		}
-
-		buildDir := filepath.Join(tmpDir, "build")
-		if err := os.MkdirAll(buildDir, 0o755); err != nil {
-			cleanup()
-			return "", nil, fmt.Errorf("mkdir build: %w", err)
-		}
-		finalSrc := filepath.Join(buildDir, "main.go")
-		if err := os.Rename(bundlePath, finalSrc); err != nil {
-			cleanup()
-			return "", nil, fmt.Errorf("move bundle: %w", err)
-		}
-
-		compileCtx, compileCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer compileCancel()
-
-		compileCmd := exec.CommandContext(compileCtx, "go", "build", "-o", "run", finalSrc)
-		compileCmd.Dir = buildDir
-
-		if out, err := compileCmd.CombinedOutput(); err != nil {
-			cleanup()
-			if compileCtx.Err() == context.DeadlineExceeded {
-				return "", nil, fmt.Errorf("compilation timeout")
-			}
-			return "", nil, fmt.Errorf("compile: %s", out)
-		}
-
-		return filepath.Join(buildDir, "run"), cleanup, nil
-	}
-
-	// Fallback path: standard go mod init/tidy/build for environments without gollect.
-	if err := stageGoSource(opts, tmpDir); err != nil {
+	bundlePath, err := BundleGo(opts, tmpDir)
+	if err != nil {
 		cleanup()
 		return "", nil, err
 	}
 
-	modInit := exec.Command("go", "mod", "init", "sinit-run")
-	modInit.Dir = tmpDir
-	if out, err := modInit.CombinedOutput(); err != nil {
+	buildDir := filepath.Join(tmpDir, "build")
+	if err := os.MkdirAll(buildDir, 0o755); err != nil {
 		cleanup()
-		return "", nil, fmt.Errorf("go mod init: %s", out)
+		return "", nil, fmt.Errorf("mkdir build: %w", err)
 	}
-
-	modTidy := exec.Command("go", "mod", "tidy")
-	modTidy.Dir = tmpDir
-	if out, err := modTidy.CombinedOutput(); err != nil {
+	finalSrc := filepath.Join(buildDir, "main.go")
+	if err := os.Rename(bundlePath, finalSrc); err != nil {
 		cleanup()
-		return "", nil, fmt.Errorf("go mod tidy: %s", out)
+		return "", nil, fmt.Errorf("move bundle: %w", err)
 	}
 
 	compileCtx, compileCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer compileCancel()
 
-	compileCmd := exec.CommandContext(compileCtx, "go", "build", "-o", "run",
-		filepath.Join(tmpDir, "solve.go"),
-		filepath.Join(tmpDir, "main.go"),
-	)
-	compileCmd.Dir = tmpDir
+	compileCmd := exec.CommandContext(compileCtx, "go", "build", "-o", "run", finalSrc)
+	compileCmd.Dir = buildDir
 
 	if out, err := compileCmd.CombinedOutput(); err != nil {
 		cleanup()
@@ -208,7 +168,7 @@ func compileGo(opts Options) (string, func(), error) {
 		return "", nil, fmt.Errorf("compile: %s", out)
 	}
 
-	return filepath.Join(tmpDir, "run"), cleanup, nil
+	return filepath.Join(buildDir, "run"), cleanup, nil
 }
 
 // compileRust piggy-backs on the enclosing cargo project so external crates
@@ -355,9 +315,13 @@ func stageGoSource(opts Options, dir string) error {
 
 // BundleGo generates a self-contained single-file Go bundle for the given
 // problem using gollect. It stages solve.go, main.go and a go.mod inside
-// stageDir, runs gollect, and returns the path to the produced bundle file.
-func BundleGo(opts Options, stageDir string, gollectBin string) (string, error) {
-	if err := stageGoSource(opts, stageDir); err != nil {
+// stageDir, invokes gollect in-process, and returns the path to the produced
+// bundle file.
+//
+// NOTE: BundleGo changes the process working directory and is NOT safe for
+// concurrent use. Callers must ensure serialization.
+func BundleGo(opts Options, stageDir string) (_ string, err error) {
+	if err = stageGoSource(opts, stageDir); err != nil {
 		return "", err
 	}
 
@@ -365,25 +329,52 @@ func BundleGo(opts Options, stageDir string, gollectBin string) (string, error) 
 	// Note: replace directives in the user's go.mod may break gollect inlining.
 	userGoMod, goModErr := findMarkerUpward(opts.WorkDir, "go.mod")
 	if goModErr == nil {
-		if err := copyFile(filepath.Join(userGoMod, "go.mod"), filepath.Join(stageDir, "go.mod")); err != nil {
+		if err = copyFile(filepath.Join(userGoMod, "go.mod"), filepath.Join(stageDir, "go.mod")); err != nil {
 			return "", fmt.Errorf("copy go.mod: %w", err)
 		}
-		if err := copyFile(filepath.Join(userGoMod, "go.sum"), filepath.Join(stageDir, "go.sum")); err != nil {
+		if err = copyFile(filepath.Join(userGoMod, "go.sum"), filepath.Join(stageDir, "go.sum")); err != nil {
 			if !os.IsNotExist(err) {
 				return "", fmt.Errorf("copy go.sum: %w", err)
 			}
 		}
 	} else {
-		if err := os.WriteFile(filepath.Join(stageDir, "go.mod"), []byte(fmt.Sprintf("module sinit-run\n\ngo %s\n", goVersion())), 0o644); err != nil {
+		if err = os.WriteFile(filepath.Join(stageDir, "go.mod"), fmt.Appendf(nil, "module sinit-run\n\ngo %s\n", goVersion()), 0o644); err != nil {
 			return "", err
 		}
 	}
 
 	bundlePath := filepath.Join(stageDir, "bundle.go")
-	gollectCmd := exec.Command(gollectBin, "-in", "*.go", "-out", bundlePath)
-	gollectCmd.Dir = stageDir
-	if out, err := gollectCmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("gollect: %s", out)
+
+	// gollect.Main relies on packages.Load, which uses the process working
+	// directory to locate go.mod. Switch to stageDir, restore on return.
+	oldwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("getwd: %w", err)
+	}
+	if err = os.Chdir(stageDir); err != nil {
+		return "", fmt.Errorf("chdir stagedir: %w", err)
+	}
+	defer func() {
+		if rerr := os.Chdir(oldwd); rerr != nil && err == nil {
+			err = fmt.Errorf("restore working directory: %w", rerr)
+		}
+	}()
+
+	cfg := gollect.DefaultConfig()
+	cfg.InputFile = "*.go"
+	cfg.OutputPaths = []string{bundlePath}
+
+	var gollectErr error
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				gollectErr = fmt.Errorf("gollect panicked: %v", r)
+			}
+		}()
+		gollectErr = gollect.Main(cfg)
+	}()
+	if gollectErr != nil {
+		return "", fmt.Errorf("gollect: %w", gollectErr)
 	}
 
 	return bundlePath, nil

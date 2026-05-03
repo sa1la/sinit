@@ -68,13 +68,7 @@ func init() {
 				WorkDir:   wd,
 			}
 
-			gollectBin, err := exec.LookPath("gollect")
-			if err != nil {
-				fmt.Println("Error: gollect not found in PATH")
-				return
-			}
-
-			bundlePath, err := runner.BundleGo(opts, tmpDir, gollectBin)
+			bundlePath, err := runner.BundleGo(opts, tmpDir)
 			if err != nil {
 				fmt.Println("Error:", err)
 				return
