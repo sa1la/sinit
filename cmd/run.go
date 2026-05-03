@@ -4,12 +4,48 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/sa1la/sinit/utils/atcoder"
 	"github.com/sa1la/sinit/utils/runner"
 	"github.com/spf13/cobra"
 )
+
+const defaultContestPrefix = "abc"
+
+// problemArgPattern matches combined -p forms:
+//   "c"        -> letter only          (legacy)
+//   "455c"     -> digits + letter      (apply default prefix)
+//   "abc455c"  -> prefix + digits + letter
+var problemArgPattern = regexp.MustCompile(`^([a-z]{3})?(\d+)?([a-z])$`)
+
+// parseProblemArg splits a combined -p value into (contestID, problemID).
+// Returns ("", letter) when the input is a bare letter so existing usage with
+// an explicit -c still works. Bare-digits forms (e.g. "455c") assume
+// defaultContestPrefix — wrong for arc/agc contests, so callers must let an
+// explicit -c override.
+//
+// Examples:
+//   "c"       -> ("",       "c")
+//   "455c"    -> ("abc455", "c")
+//   "abc455c" -> ("abc455", "c")
+//   "arc183f" -> ("arc183", "f")
+func parseProblemArg(raw string) (contestID, problemID string) {
+	raw = strings.ToLower(raw)
+	m := problemArgPattern.FindStringSubmatch(raw)
+	if m == nil {
+		return "", raw
+	}
+	prefix, digits, letter := m[1], m[2], m[3]
+	if digits == "" {
+		return "", letter
+	}
+	if prefix == "" {
+		prefix = defaultContestPrefix
+	}
+	return prefix + digits, letter
+}
 
 func init() {
 	var problem string
@@ -31,13 +67,19 @@ func init() {
 				return
 			}
 
-			if contestID == "" {
-				contestID = filepath.Base(wd)
-			}
-
 			if problem == "" {
 				fmt.Println("Error: problem ID is required (use -p)")
 				return
+			}
+
+			// Explicit -c always wins over the inferred value.
+			inferred, prob := parseProblemArg(problem)
+			problem = prob
+			if contestID == "" {
+				contestID = inferred
+			}
+			if contestID == "" {
+				contestID = filepath.Base(wd)
 			}
 
 			// If already inside the contest directory, use wd; otherwise join it.
@@ -87,7 +129,7 @@ func init() {
 		},
 	}
 
-	runCmd.Flags().StringVarP(&problem, "problem", "p", "", "problem ID (e.g., a, b)")
+	runCmd.Flags().StringVarP(&problem, "problem", "p", "", "problem ID (e.g., c, 455c, abc455c — bare digits assume abc prefix)")
 	runCmd.Flags().IntVarP(&sample, "sample", "s", 0, "specific sample number (requires -p)")
 	runCmd.Flags().StringVarP(&contestID, "contest", "c", "", "contest ID (defaults to current directory name)")
 
