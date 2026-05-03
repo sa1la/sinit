@@ -231,11 +231,32 @@ func SolveA() {
 }
 
 func TestRun_RustPass(t *testing.T) {
-	if _, err := exec.LookPath("rustc"); err != nil {
-		t.Skip("rustc not found in PATH")
+	if _, err := exec.LookPath("cargo"); err != nil {
+		t.Skip("cargo not found in PATH")
 	}
 
 	tmp := t.TempDir()
+
+	cargoToml := `[package]
+name = "sinit-test"
+version = "0.0.0"
+edition = "2021"
+
+[[bin]]
+name = "sinit-test"
+path = "src/main.rs"
+`
+	if err := os.WriteFile(filepath.Join(tmp, "Cargo.toml"), []byte(cargoToml), 0o644); err != nil {
+		t.Fatalf("write Cargo.toml: %v", err)
+	}
+
+	srcDir := filepath.Join(tmp, "src")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatalf("mkdir src: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "main.rs"), []byte("fn main() {}\n"), 0o644); err != nil {
+		t.Fatalf("write main.rs: %v", err)
+	}
 
 	src := `pub fn solve_a() {
 	let mut input = String::new();
@@ -244,12 +265,11 @@ func TestRun_RustPass(t *testing.T) {
 	println!("{}", n * 2);
 }
 `
-	srcFile := filepath.Join(tmp, "abc375.rs")
-	if err := os.WriteFile(srcFile, []byte(src), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(srcDir, "abc375.rs"), []byte(src), 0o644); err != nil {
 		t.Fatalf("write source: %v", err)
 	}
 
-	testdataDir := filepath.Join(tmp, "abc375")
+	testdataDir := filepath.Join(srcDir, "abc375")
 	if err := os.MkdirAll(testdataDir, 0o755); err != nil {
 		t.Fatalf("mkdir testdata: %v", err)
 	}
@@ -264,7 +284,7 @@ func TestRun_RustPass(t *testing.T) {
 		Lang:      LangRust,
 		ContestID: "abc375",
 		ProblemID: "a",
-		WorkDir:   tmp,
+		WorkDir:   srcDir,
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -281,5 +301,10 @@ func TestRun_RustPass(t *testing.T) {
 	}
 	if res.SampleName != "a_1" {
 		t.Errorf("SampleName = %q, want a_1", res.SampleName)
+	}
+
+	wrapperPath := filepath.Join(tmp, "examples", rustExampleName+".rs")
+	if _, err := os.Stat(wrapperPath); !os.IsNotExist(err) {
+		t.Errorf("wrapper %s not cleaned up after Run (err=%v)", wrapperPath, err)
 	}
 }

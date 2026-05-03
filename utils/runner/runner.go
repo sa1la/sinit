@@ -15,6 +15,9 @@ type Lang string
 const (
 	LangGo   Lang = "go"
 	LangRust Lang = "rust"
+
+	// Shared so wrapper filename, --example arg, and target binary name can't drift.
+	rustExampleName = "sinit-run"
 )
 
 type Options struct {
@@ -58,20 +61,20 @@ func Run(opts Options) ([]Result, error) {
 	}
 
 	var binary string
-	var tmpDir string
+	var cleanup func()
 	switch opts.Lang {
 	case LangGo:
-		binary, tmpDir, err = compileGo(opts)
+		binary, cleanup, err = compileGo(opts)
 	case LangRust:
-		binary, tmpDir, err = compileRust(opts)
+		binary, cleanup, err = compileRust(opts)
 	default:
 		err = fmt.Errorf("unsupported lang: %q", opts.Lang)
 	}
 	if err != nil {
 		return nil, err
 	}
-	if tmpDir != "" {
-		defer os.RemoveAll(tmpDir)
+	if cleanup != nil {
+		defer cleanup()
 	}
 
 	var results []Result
@@ -119,30 +122,31 @@ func runSample(binary, sampleName, inFile, outFile string) (Result, error) {
 	return res, nil
 }
 
-func compileGo(opts Options) (string, string, error) {
+func compileGo(opts Options) (string, func(), error) {
 	if _, err := exec.LookPath("go"); err != nil {
-		return "", "", fmt.Errorf("go not found in PATH")
+		return "", nil, fmt.Errorf("go not found in PATH")
 	}
 
 	goPattern := filepath.Join(opts.WorkDir, opts.ContestID, strings.ToUpper(opts.ProblemID)+".*.go")
 	matches, err := filepath.Glob(goPattern)
 	if err != nil {
-		return "", "", fmt.Errorf("glob source: %w", err)
+		return "", nil, fmt.Errorf("glob source: %w", err)
 	}
 	if len(matches) == 0 {
-		return "", "", fmt.Errorf("source file for problem %s not found in %s", opts.ProblemID, opts.WorkDir)
+		return "", nil, fmt.Errorf("source file for problem %s not found in %s", opts.ProblemID, opts.WorkDir)
 	}
 	srcFile := matches[0]
 
 	tmpDir, err := os.MkdirTemp("", "sinit-run-*")
 	if err != nil {
-		return "", "", fmt.Errorf("mkdirtemp: %w", err)
+		return "", nil, fmt.Errorf("mkdirtemp: %w", err)
 	}
+	cleanup := func() { os.RemoveAll(tmpDir) }
 
 	src, err := os.ReadFile(srcFile)
 	if err != nil {
-		os.RemoveAll(tmpDir)
-		return "", "", fmt.Errorf("read source: %w", err)
+		cleanup()
+		return "", nil, fmt.Errorf("read source: %w", err)
 	}
 	srcStr := string(src)
 	lines := strings.Split(srcStr, "\n")
@@ -156,30 +160,30 @@ func compileGo(opts Options) (string, string, error) {
 	rewritten := strings.Join(lines, "\n")
 	solveFile := filepath.Join(tmpDir, "solve.go")
 	if err := os.WriteFile(solveFile, []byte(rewritten), 0o644); err != nil {
-		os.RemoveAll(tmpDir)
-		return "", "", err
+		cleanup()
+		return "", nil, err
 	}
 
 	solveFunc := "Solve" + strings.ToUpper(opts.ProblemID)
 	wrapper := fmt.Sprintf("package main\n\nfunc main() {\n\t%s()\n}\n", solveFunc)
 	mainFile := filepath.Join(tmpDir, "main.go")
 	if err := os.WriteFile(mainFile, []byte(wrapper), 0o644); err != nil {
-		os.RemoveAll(tmpDir)
-		return "", "", err
+		cleanup()
+		return "", nil, err
 	}
 
 	modInit := exec.Command("go", "mod", "init", "sinit-run")
 	modInit.Dir = tmpDir
 	if out, err := modInit.CombinedOutput(); err != nil {
-		os.RemoveAll(tmpDir)
-		return "", "", fmt.Errorf("go mod init: %s", out)
+		cleanup()
+		return "", nil, fmt.Errorf("go mod init: %s", out)
 	}
 
 	modTidy := exec.Command("go", "mod", "tidy")
 	modTidy.Dir = tmpDir
 	if out, err := modTidy.CombinedOutput(); err != nil {
-		os.RemoveAll(tmpDir)
-		return "", "", fmt.Errorf("go mod tidy: %s", out)
+		cleanup()
+		return "", nil, fmt.Errorf("go mod tidy: %s", out)
 	}
 
 	compileCtx, compileCancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -189,61 +193,86 @@ func compileGo(opts Options) (string, string, error) {
 	compileCmd.Dir = tmpDir
 
 	if out, err := compileCmd.CombinedOutput(); err != nil {
-		os.RemoveAll(tmpDir)
+		cleanup()
 		if compileCtx.Err() == context.DeadlineExceeded {
-			return "", "", fmt.Errorf("compilation timeout")
+			return "", nil, fmt.Errorf("compilation timeout")
 		}
-		return "", "", fmt.Errorf("compile: %s", out)
+		return "", nil, fmt.Errorf("compile: %s", out)
 	}
 
-	return filepath.Join(tmpDir, "run"), tmpDir, nil
+	return filepath.Join(tmpDir, "run"), cleanup, nil
 }
 
-func compileRust(opts Options) (string, string, error) {
-	if _, err := exec.LookPath("rustc"); err != nil {
-		return "", "", fmt.Errorf("rustc not found in PATH")
+// compileRust piggy-backs on the enclosing cargo project so external crates
+// (proconio, etc.) resolve via the user's Cargo.toml instead of bare rustc,
+// which has no access to dependencies.
+func compileRust(opts Options) (string, func(), error) {
+	if _, err := exec.LookPath("cargo"); err != nil {
+		return "", nil, fmt.Errorf("cargo not found in PATH")
+	}
+
+	cargoRoot, err := findCargoRoot(opts.WorkDir)
+	if err != nil {
+		return "", nil, err
 	}
 
 	srcFile := filepath.Join(opts.WorkDir, opts.ContestID+".rs")
-
-	tmpDir, err := os.MkdirTemp("", "sinit-run-*")
-	if err != nil {
-		return "", "", fmt.Errorf("mkdirtemp: %w", err)
+	if _, err := os.Stat(srcFile); err != nil {
+		if os.IsNotExist(err) {
+			return "", nil, fmt.Errorf("source file %s not found", srcFile)
+		}
+		return "", nil, fmt.Errorf("stat source: %w", err)
 	}
 
-	src, err := os.ReadFile(srcFile)
-	if err != nil {
-		os.RemoveAll(tmpDir)
-		return "", "", fmt.Errorf("read source: %w", err)
+	examplesDir := filepath.Join(cargoRoot, "examples")
+	if err := os.MkdirAll(examplesDir, 0o755); err != nil {
+		return "", nil, fmt.Errorf("mkdir examples: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, opts.ContestID+".rs"), src, 0o644); err != nil {
-		os.RemoveAll(tmpDir)
-		return "", "", err
-	}
+	wrapperPath := filepath.Join(examplesDir, rustExampleName+".rs")
 
 	solveFunc := "solve_" + strings.ToLower(opts.ProblemID)
-	wrapper := fmt.Sprintf("mod %s;\n\nfn main() {\n\t%s::%s();\n}\n",
-		opts.ContestID, opts.ContestID, solveFunc)
-	if err := os.WriteFile(filepath.Join(tmpDir, "main.rs"), []byte(wrapper), 0o644); err != nil {
-		os.RemoveAll(tmpDir)
-		return "", "", err
-	}
+	wrapper := fmt.Sprintf(`#[path = %q]
+mod %s;
 
-	compileCtx, compileCancel := context.WithTimeout(context.Background(), 30*time.Second)
+fn main() {
+    %s::%s();
+}
+`, srcFile, opts.ContestID, opts.ContestID, solveFunc)
+	if err := os.WriteFile(wrapperPath, []byte(wrapper), 0o644); err != nil {
+		return "", nil, fmt.Errorf("write wrapper: %w", err)
+	}
+	cleanup := func() { os.Remove(wrapperPath) }
+
+	compileCtx, compileCancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer compileCancel()
 
-	compileCmd := exec.CommandContext(compileCtx, "rustc", "main.rs", "-o", "run")
-	compileCmd.Dir = tmpDir
+	compileCmd := exec.CommandContext(compileCtx, "cargo", "build", "--example", rustExampleName)
+	compileCmd.Dir = cargoRoot
 
 	if out, err := compileCmd.CombinedOutput(); err != nil {
-		os.RemoveAll(tmpDir)
+		cleanup()
 		if compileCtx.Err() == context.DeadlineExceeded {
-			return "", "", fmt.Errorf("compilation timeout")
+			return "", nil, fmt.Errorf("compilation timeout")
 		}
-		return "", "", fmt.Errorf("compile: %s", out)
+		return "", nil, fmt.Errorf("compile: %s", out)
 	}
 
-	return filepath.Join(tmpDir, "run"), tmpDir, nil
+	binary := filepath.Join(cargoRoot, "target", "debug", "examples", rustExampleName)
+	return binary, cleanup, nil
+}
+
+func findCargoRoot(startDir string) (string, error) {
+	dir := startDir
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "Cargo.toml")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("Cargo.toml not found above %s", startDir)
+		}
+		dir = parent
+	}
 }
 
 func execute(binary, inFile string) ([]byte, time.Duration, error) {
