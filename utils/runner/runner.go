@@ -77,6 +77,9 @@ func Run(opts Options) ([]Result, error) {
 		defer cleanup()
 	}
 
+	// Prime the OS page cache so the first sample isn't penalized by cold-start.
+	warmUp(binary, inFiles[0])
+
 	var results []Result
 	for _, inFile := range inFiles {
 		sampleName := strings.TrimSuffix(filepath.Base(inFile), ".in")
@@ -273,6 +276,27 @@ func findCargoRoot(startDir string) (string, error) {
 		}
 		dir = parent
 	}
+}
+
+// warmUp runs the binary once and discards the result, priming the OS page
+// cache and dyld so the first timed sample isn't 100x slower than the rest
+// due to cold-start overhead. Errors are swallowed — if the binary is broken,
+// the timed runs that follow will surface the error.
+func warmUp(binary, inFile string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, binary)
+	cmd.Dir = filepath.Dir(binary)
+
+	in, err := os.Open(inFile)
+	if err != nil {
+		return
+	}
+	defer in.Close()
+	cmd.Stdin = in
+
+	_ = cmd.Run()
 }
 
 func execute(binary, inFile string) ([]byte, time.Duration, error) {
