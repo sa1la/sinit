@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"text/template"
 	"time"
 
@@ -136,9 +135,29 @@ func fetchHTML(url, contestID string) ([]byte, error) {
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("oops. %s not started yet", contestID)
+		return nil, classifyHTTPError(response.StatusCode, contestID, url)
 	}
 	return io.ReadAll(io.LimitReader(response.Body, maxBodyBytes))
+}
+
+// classifyHTTPError maps AtCoder failure responses to actionable messages:
+//   - 404 → contest not found / not started
+//   - 429 → concurrent requests tripped the rate limiter
+//   - 5xx → server-side issue
+func classifyHTTPError(status int, contestID, url string) error {
+	switch {
+	case status == http.StatusNotFound:
+		if contestID != "" {
+			return fmt.Errorf("contest %s not found (not started yet?)", contestID)
+		}
+		return fmt.Errorf("page not found: %s", url)
+	case status == http.StatusTooManyRequests:
+		return fmt.Errorf("rate limited by AtCoder, try again: %s", url)
+	case status >= 500:
+		return fmt.Errorf("AtCoder server error (HTTP %d): %s", status, url)
+	default:
+		return fmt.Errorf("unexpected HTTP %d: %s", status, url)
+	}
 }
 
 func extractTasks(body []byte, contestID string) []Problem {
@@ -163,8 +182,8 @@ func extractTasks(body []byte, contestID string) []Problem {
 	return problems
 }
 
-func ExtractSamples(problemURL string) ([]Sample, error) {
-	body, err := fetchHTML(problemURL, "")
+func ExtractSamples(problemURL, contestID string) ([]Sample, error) {
+	body, err := fetchHTML(problemURL, contestID)
 	if err != nil {
 		return nil, fmt.Errorf("fetch problem page: %w", err)
 	}
@@ -293,7 +312,7 @@ func createContestsProblems(problems []Problem, contestID string, entry langEntr
 }
 
 func writeProblemSamples(prob Problem, perProblem bool, force bool) error {
-	samples, err := ExtractSamples(prob.URL)
+	samples, err := ExtractSamples(prob.URL, prob.ContestID)
 	if err != nil {
 		return err
 	}
@@ -326,21 +345,8 @@ func writeProblemSamples(prob Problem, perProblem bool, force bool) error {
 }
 
 func writeAllProblemSamples(problems []Problem, perProblem bool, force bool) error {
-	var wg sync.WaitGroup
-	errCh := make(chan error, len(problems))
 	for _, prob := range problems {
-		wg.Add(1)
-		go func(p Problem) {
-			defer wg.Done()
-			if err := writeProblemSamples(p, perProblem, force); err != nil {
-				errCh <- err
-			}
-		}(prob)
-	}
-	wg.Wait()
-	close(errCh)
-	for err := range errCh {
-		if err != nil {
+		if err := writeProblemSamples(prob, perProblem, force); err != nil {
 			return err
 		}
 	}
