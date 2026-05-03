@@ -44,10 +44,9 @@ func Solve{{.ID}}() {
 // {{.URL}}
 #[allow(dead_code)]
 pub fn solve_{{.ID}}() {
-	let stdin = std::io::stdin();
-	let mut lines = stdin.lock().lines();
-
-	// Read input from stdin, write answer to stdout
+	input! {
+		// from source
+	}
 }
 
 `
@@ -72,6 +71,7 @@ type langSpec struct {
 	formatter   string
 	formatArgs  func(target string) []string
 	transformID func(string) string
+	header      string // written once at the top of single-file output
 }
 
 type langEntry struct {
@@ -100,6 +100,7 @@ var (
 				formatter:   "rustfmt",
 				formatArgs:  func(file string) []string { return []string{file} },
 				transformID: strings.ToLower,
+				header:      "use proconio::input;\n\n",
 			},
 		},
 	}
@@ -286,6 +287,9 @@ func createContestsProblems(problems []Problem, contestID string, entry langEntr
 	} else {
 		fileName := fmt.Sprintf("%s.%s", contestID, entry.spec.ext)
 		var content strings.Builder
+		if entry.spec.header != "" {
+			content.WriteString(entry.spec.header)
+		}
 		for _, prob := range problems {
 			p := prob
 			p.ID = entry.spec.transformID(prob.ID)
