@@ -29,16 +29,16 @@ const (
 	httpTimeout  = 15 * time.Second
 	maxBodyBytes = 4 << 20
 
-	problemFileTempForGo = `package {{.ContestID}}
+	problemFileTempForGo = `package main
 
 import "github.com/sa1la/goin"
 
-//TODO {{.CurrentDate}} {{.ContestID}}.{{.ID}}
+// Solve{{.ID}} TODO {{.CurrentDate}} {{.ContestID}}.{{.ID}}
 // {{.URL}}
 func Solve{{.ID}}() {
 	defer goin.Flush()
-
-}`
+}
+`
 
 	problemFileTempForRust = `//TODO {{.CurrentDate}} {{.ContestID}}.{{.ID}} {{.Title}}
 // {{.URL}}

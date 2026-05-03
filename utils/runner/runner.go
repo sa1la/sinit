@@ -277,18 +277,6 @@ func findMarkerUpward(startDir, marker string) (string, error) {
 	}
 }
 
-func rewritePackageMain(src string) string {
-	lines := strings.Split(src, "\n")
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "package ") {
-			lines[i] = "package main"
-			return strings.Join(lines, "\n")
-		}
-	}
-	return src
-}
-
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
@@ -345,8 +333,8 @@ func findGoSource(opts Options) (string, error) {
 	return matches[0], nil
 }
 
-// stageGoSource locates the problem's Go source, rewrites its package
-// declaration to "main", and writes both solve.go and main.go into dir.
+// stageGoSource locates the problem's Go source and copies it, along with a
+// generated main.go wrapper, into dir.
 func stageGoSource(opts Options, dir string) error {
 	srcFile, err := findGoSource(opts)
 	if err != nil {
@@ -356,8 +344,7 @@ func stageGoSource(opts Options, dir string) error {
 	if err != nil {
 		return fmt.Errorf("read source: %w", err)
 	}
-	rewritten := rewritePackageMain(string(src))
-	if err := os.WriteFile(filepath.Join(dir, "solve.go"), []byte(rewritten), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "solve.go"), src, 0o644); err != nil {
 		return err
 	}
 	if err := writeMainGo(filepath.Join(dir, "main.go"), solveFuncName(opts)); err != nil {

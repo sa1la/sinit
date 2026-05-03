@@ -66,12 +66,10 @@ Samples are discovered by scanning `<h3>` tags for "Sample Input" / "Sample Outp
 
 Go solutions are compiled in a **temporary directory** with an ephemeral `go.mod`:
 
-1. The source file is copied and its `package` declaration rewritten to `package main`.
+1. The source file is copied into the temp directory.
 2. A generated `main.go` wrapper calls `Solve{PROBLEM}()`.
 3. `go mod init` + `go mod tidy` + `go build` runs in the temp directory.
 4. The temp directory is cleaned up after execution.
-
-This is necessary because the scaffolded files use a per-contest package name (e.g., `package abc375`) that isn't runnable as `main`.
 
 **Rust Compilation Strategy**
 

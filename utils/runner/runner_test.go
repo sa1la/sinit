@@ -17,7 +17,7 @@ func TestRun_GoPass(t *testing.T) {
 	}
 
 	// Create a simple Go source file
-	src := `package abc375
+	src := `package main
 
 import "fmt"
 
@@ -76,7 +76,7 @@ func TestRun_GoFail(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	src := `package abc375
+	src := `package main
 
 import "fmt"
 
@@ -136,7 +136,7 @@ func TestRun_GoMissingOut(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	src := `package abc375
+	src := `package main
 import "fmt"
 func SolveA() { fmt.Println(42) }
 `
@@ -186,7 +186,7 @@ func TestRun_GoTimeout(t *testing.T) {
 	}
 
 	// Infinite loop
-	src := `package abc375
+	src := `package main
 func SolveA() {
 	for {}
 }
@@ -322,7 +322,7 @@ func TestBundleGo_StdlibOnly(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	src := `package abc375
+	src := `package main
 
 import "fmt"
 
@@ -371,7 +371,7 @@ func TestBundleGo_CopiesUserGoMod(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	src := `package abc375
+	src := `package main
 
 import "fmt"
 
