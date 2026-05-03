@@ -9,6 +9,7 @@ import (
 
 func newAtcoderCmd(use, short, long string, lang atcoder.Lang) *cobra.Command {
 	var contestID string
+	var force bool
 	cmd := &cobra.Command{
 		Use:   use,
 		Short: short,
@@ -22,7 +23,7 @@ func newAtcoderCmd(use, short, long string, lang atcoder.Lang) *cobra.Command {
 				fmt.Scanln(&contestID)
 			}
 			fmt.Println("creating...")
-			if err := atcoder.CreateContestsTasks(contestID, lang); err != nil {
+			if err := atcoder.CreateContestsTasks(contestID, lang, force); err != nil {
 				fmt.Println(err)
 				return
 			}
@@ -30,6 +31,7 @@ func newAtcoderCmd(use, short, long string, lang atcoder.Lang) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&contestID, "contest", "c", "", "-c=abc376")
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "overwrite existing sample files")
 	return cmd
 }
 

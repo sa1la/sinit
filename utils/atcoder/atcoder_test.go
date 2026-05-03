@@ -93,3 +93,48 @@ func TestExtractTasks_EdgeCases(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractSamples_Basic(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("testdata", "problem_samples.html"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+
+	samples, err := extractSamplesFromBody(body)
+	if err != nil {
+		t.Fatalf("extractSamplesFromBody: %v", err)
+	}
+
+	if len(samples) != 3 {
+		t.Fatalf("len(samples) = %d, want 3", len(samples))
+	}
+
+	want := []struct {
+		input  string
+		output string
+	}{
+		{"3 5\n1 2 3\n<test>", "9\nhello world"},
+		{"1 1\n100", "100"},
+		{"2 4\n& &", "<result>"},
+	}
+
+	for i, s := range samples {
+		if s.Input != want[i].input {
+			t.Errorf("sample[%d].Input = %q, want %q", i, s.Input, want[i].input)
+		}
+		if s.Output != want[i].output {
+			t.Errorf("sample[%d].Output = %q, want %q", i, s.Output, want[i].output)
+		}
+	}
+}
+
+func TestExtractSamples_NoSamples(t *testing.T) {
+	body := []byte(`<html><body><h3>Constraints</h3><p>No samples here</p></body></html>`)
+	samples, err := extractSamplesFromBody(body)
+	if err != nil {
+		t.Fatalf("extractSamplesFromBody: %v", err)
+	}
+	if len(samples) != 0 {
+		t.Errorf("len(samples) = %d, want 0", len(samples))
+	}
+}

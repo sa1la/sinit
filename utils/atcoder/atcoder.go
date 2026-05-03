@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"io/fs"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 
@@ -43,7 +45,10 @@ func Solve{{.ID}}() {
 // {{.URL}}
 #[allow(dead_code)]
 pub fn solve_{{.ID}}() {
+	let stdin = std::io::stdin();
+	let mut lines = stdin.lock().lines();
 
+	// Read input from stdin, write answer to stdout
 }
 
 `
@@ -55,6 +60,11 @@ type Problem struct {
 	Title       string
 	URL         string
 	CurrentDate string
+}
+
+type Sample struct {
+	Input  string
+	Output string
 }
 
 type langSpec struct {
@@ -104,7 +114,7 @@ func RenderProblem(w io.Writer, p Problem, lang Lang) error {
 	return entry.tmpl.Execute(w, p)
 }
 
-func CreateContestsTasks(contestID string, lang Lang) error {
+func CreateContestsTasks(contestID string, lang Lang, force bool) error {
 	entry, ok := registry[lang]
 	if !ok {
 		return fmt.Errorf("unsupported lang: %q", lang)
@@ -115,7 +125,7 @@ func CreateContestsTasks(contestID string, lang Lang) error {
 		return err
 	}
 	problems := extractTasks(body, contestID)
-	return createContestsProblems(problems, contestID, entry)
+	return createContestsProblems(problems, contestID, entry, force)
 }
 
 func fetchHTML(url, contestID string) ([]byte, error) {
@@ -153,6 +163,50 @@ func extractTasks(body []byte, contestID string) []Problem {
 	return problems
 }
 
+func ExtractSamples(problemURL string) ([]Sample, error) {
+	body, err := fetchHTML(problemURL, "")
+	if err != nil {
+		return nil, fmt.Errorf("fetch problem page: %w", err)
+	}
+	return extractSamplesFromBody(body)
+}
+
+func extractSamplesFromBody(body []byte) ([]Sample, error) {
+	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("parse problem page: %w", err)
+	}
+
+	var samples []Sample
+	var currentInput string
+	var currentOutput string
+
+	doc.Find("h3").Each(func(i int, s *goquery.Selection) {
+		text := strings.ToLower(s.Text())
+		if strings.Contains(text, "sample input") {
+			currentInput = ""
+			s.NextFiltered("pre").Each(func(j int, pre *goquery.Selection) {
+				currentInput = html.UnescapeString(pre.Text())
+			})
+		} else if strings.Contains(text, "sample output") {
+			currentOutput = ""
+			s.NextFiltered("pre").Each(func(j int, pre *goquery.Selection) {
+				currentOutput = html.UnescapeString(pre.Text())
+			})
+			if currentOutput != "" {
+				samples = append(samples, Sample{
+					Input:  strings.TrimSpace(currentInput),
+					Output: strings.TrimSpace(currentOutput),
+				})
+				currentInput = ""
+				currentOutput = ""
+			}
+		}
+	})
+
+	return samples, nil
+}
+
 func createFile(data []byte, fileName string) (bool, error) {
 	file, err := os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
@@ -168,13 +222,34 @@ func createFile(data []byte, fileName string) (bool, error) {
 	return true, nil
 }
 
-func createContestsProblems(problems []Problem, contestID string, entry langEntry) error {
+func writeSampleFile(data []byte, fileName string, force bool) (bool, error) {
+	flags := os.O_WRONLY | os.O_CREATE
+	if !force {
+		flags |= os.O_EXCL
+	}
+	file, err := os.OpenFile(fileName, flags, 0o644)
+	if err != nil {
+		if !force && errors.Is(err, fs.ErrExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("create %s: %w", fileName, err)
+	}
+	defer file.Close()
+	if _, err := file.Write(data); err != nil {
+		return false, fmt.Errorf("write %s: %w", fileName, err)
+	}
+	return true, nil
+}
+
+func createContestsProblems(problems []Problem, contestID string, entry langEntry, force bool) error {
 	var formatTarget string
 	created := false
+
+	if err := os.MkdirAll(contestID, os.ModePerm); err != nil {
+		return fmt.Errorf("mkdir %s: %w", contestID, err)
+	}
+
 	if entry.spec.perProblem {
-		if err := os.MkdirAll(contestID, os.ModePerm); err != nil {
-			return fmt.Errorf("mkdir %s: %w", contestID, err)
-		}
 		for _, prob := range problems {
 			p := prob
 			p.ID = entry.spec.transformID(prob.ID)
@@ -191,7 +266,7 @@ func createContestsProblems(problems []Problem, contestID string, entry langEntr
 		}
 		formatTarget = contestID
 	} else {
-		fileName := fmt.Sprintf("%s.%s", contestID, entry.spec.ext)
+		fileName := filepath.Join(contestID, fmt.Sprintf("%s.%s", contestID, entry.spec.ext))
 		var content strings.Builder
 		for _, prob := range problems {
 			p := prob
@@ -207,10 +282,65 @@ func createContestsProblems(problems []Problem, contestID string, entry langEntr
 		}
 		formatTarget = fileName
 	}
+
+	if err := writeAllProblemSamples(problems, force); err != nil {
+		return err
+	}
+
 	if !created {
 		return nil
 	}
 	return runFormatter(entry.spec.formatter, entry.spec.formatArgs(formatTarget))
+}
+
+func writeProblemSamples(prob Problem, force bool) error {
+	samples, err := ExtractSamples(prob.URL)
+	if err != nil {
+		return err
+	}
+
+	testdataDir := filepath.Join(prob.ContestID, "testdata")
+	if err := os.MkdirAll(testdataDir, os.ModePerm); err != nil {
+		return fmt.Errorf("mkdir %s: %w", testdataDir, err)
+	}
+
+	lowerID := strings.ToLower(prob.ID)
+	for i, sample := range samples {
+		n := i + 1
+		inFile := filepath.Join(testdataDir, fmt.Sprintf("%s_%d.in", lowerID, n))
+		outFile := filepath.Join(testdataDir, fmt.Sprintf("%s_%d.out", lowerID, n))
+
+		if _, err := writeSampleFile([]byte(sample.Input), inFile, force); err != nil {
+			return err
+		}
+		if _, err := writeSampleFile([]byte(sample.Output), outFile, force); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func writeAllProblemSamples(problems []Problem, force bool) error {
+	var wg sync.WaitGroup
+	errCh := make(chan error, len(problems))
+	for _, prob := range problems {
+		wg.Add(1)
+		go func(p Problem) {
+			defer wg.Done()
+			if err := writeProblemSamples(p, force); err != nil {
+				errCh <- err
+			}
+		}(prob)
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func runFormatter(name string, args []string) error {
@@ -247,5 +377,9 @@ func isAtcoderDirectory() bool {
 		fmt.Println("Error getting current directory:", err)
 		return false
 	}
-	return filepath.Base(currentDir) == "atcoder"
+	if filepath.Base(currentDir) == "atcoder" {
+		return true
+	}
+	parent := filepath.Dir(currentDir)
+	return filepath.Base(parent) == "atcoder"
 }
