@@ -1,9 +1,11 @@
 # sinit
 
-A small CLI that automates two recurring chores when starting projects:
+A small CLI for the chores around competitive programming (mostly AtCoder) and fresh project repos:
 
-1. **`sinit init`** — wipes the target directory's `.git` history and creates a fresh repo with an initial commit.
-2. **`sinit ac` / `sinit acr`** — pulls problems for an AtCoder contest and scaffolds a Go file per problem (`ac`) or a single Rust file with all stubs (`acr`).
+1. **`sinit init`** — wipe a directory's `.git` history and create a fresh repo with an initial commit.
+2. **`sinit ac` / `sinit acr`** — pull problems for an AtCoder contest and scaffold solution files (Go: one file per problem; Rust: a single source file with all stubs).
+3. **`sinit run`** — compile and run a solution against the stored sample inputs.
+4. **`sinit bundle`** — produce a self-contained, single-file Go source ready to paste into AtCoder's submission box.
 
 ## Install
 
@@ -21,7 +23,7 @@ go build -o sinit
 
 ## Usage
 
-### Reset / re-initialize a git repository
+### `sinit init` — reset a project's git history
 
 ```bash
 sinit init -p ./my-project -u alice -e alice@example.com
@@ -33,27 +35,80 @@ sinit init -p ./my-project -u alice -e alice@example.com
 | `-u`, `--user`    | `admin` | local `user.name` |
 | `-e`, `--email`   | `default@email.com` | local `user.email` |
 
-This deletes `<project>/.git`, runs `git init`, sets a local user, stages everything, and creates an `Initial commit`.
+Deletes `<project>/.git`, runs `git init`, sets the local user, stages everything, and creates `Initial commit`.
 
-### Scaffold an AtCoder contest
+### `sinit ac` / `sinit acr` — scaffold an AtCoder contest
 
 ```bash
 cd /path/to/atcoder
 
-# Go: one .go file per problem inside ./<contestID>/
+# Go: one .go file per problem, inside ./<contestID>/
 sinit ac -c abc375
 
 # Rust: a single ./<contestID>.rs with one stub fn per problem
 sinit acr -c abc375
 ```
 
-Both subcommands look at the current directory's name; if it does not end in `atcoder`, they prompt before continuing.
+| flag | default | meaning |
+|---|---|---|
+| `-c`, `--contest` | *(prompted)* | contest ID, e.g. `abc375`, `arc183` |
+| `-f`, `--force`   | `false` | overwrite existing sample files |
 
-The Go template depends on [`github.com/sa1la/goin`](https://github.com/sa1la/goin) and is formatted with `gofmt` (skipped if not on PATH). The Rust output is formatted with `rustfmt` (also optional). Both templates live in `utils/atcoder/atcoder.go`.
+Both subcommands check that the current directory — or its immediate parent — is named `atcoder`; otherwise they prompt before continuing. Sample inputs/outputs are fetched concurrently and written to:
+
+- Go:   `./<contestID>/testdata/<problem>_<n>.{in,out}`
+- Rust: `./<contestID>/<problem>_<n>.{in,out}`
+
+The Go template depends on [`github.com/sa1la/goin`](https://github.com/sa1la/goin) (auto-fetched on first compile). Output is run through `gofmt` / `rustfmt` if available — skipped silently if not.
+
+### `sinit run` — run a solution against the samples
+
+```bash
+# All three forms select problem C of abc455:
+sinit run -p abc455c
+sinit run -p 455c            # bare digits assume the abc prefix
+sinit run -c abc455 -p c     # explicit contest, legacy form
+
+# Run only sample 2:
+sinit run -p abc455c -s 2
+```
+
+| flag | default | meaning |
+|---|---|---|
+| `-p`, `--problem` | *(required)* | problem ID — accepts `c`, `455c`, or `abc455c` |
+| `-c`, `--contest` | *(inferred)* | overrides the contest inferred from `-p` or the cwd |
+| `-s`, `--sample`  | `0` | run a single sample by number instead of all |
+
+Language is auto-detected: if `<contest>/<PROBLEM>.*.go` exists it's Go, otherwise it falls back to `<contest>.rs`. Each sample is timed and compared line-by-line; results are printed with ✅ / ❌. Running a Rust solution additionally requires a `Cargo.toml` somewhere up the directory tree — `sinit` builds the wrapper as a `cargo --example` inside that workspace.
+
+### `sinit bundle` — build a single-file Go submission
+
+```bash
+# Print to stdout
+sinit bundle -p abc455c
+
+# Write to a file
+sinit bundle -p abc455c -o submission.go
+
+# Copy straight to the clipboard
+sinit bundle -p abc455c --copy
+```
+
+| flag | default | meaning |
+|---|---|---|
+| `-p`, `--problem` | *(required)* | problem ID, same syntax as `run` |
+| `-c`, `--contest` | *(inferred)* | overrides the contest inferred from `-p` or the cwd |
+| `-o`, `--output`  | *(stdout)* | write the bundle to this file |
+| `--copy`          | `false` | copy the bundle to the system clipboard |
+
+Inlines the `goin` helper library (and any other internal imports) into a single source file using [`gollect`](https://github.com/murosan/gollect), which is vendored as a library — no separate binary to install.
+
+Clipboard backend: `pbcopy` (macOS), `clip` (Windows), or `xclip` / `xsel` (Linux — install one of them).
 
 ## Requirements
 
-- Go 1.23+
+- Go 1.25+
 - `git` on PATH (for `init`)
-- `gofmt` on PATH (optional; `ac` will skip formatting if missing)
-- `rustfmt` on PATH (optional; `acr` will skip formatting if missing)
+- A Rust toolchain with `cargo` on PATH, plus an enclosing `Cargo.toml` (only for `run` on Rust solutions; `acr` itself only needs `rustfmt`)
+- `gofmt` / `rustfmt` on PATH (optional; formatting is skipped if missing)
+- `pbcopy` / `clip` / `xclip` / `xsel` (only when using `bundle --copy`)
