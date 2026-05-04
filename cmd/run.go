@@ -72,35 +72,19 @@ func init() {
 				return
 			}
 
-			// Explicit -c always wins over the inferred value.
-			inferred, prob := parseProblemArg(problem)
-			problem = prob
-			if contestID == "" {
-				contestID = inferred
-			}
-			if contestID == "" {
-				contestID = filepath.Base(wd)
-			}
+			contestRoot, cid, problemID := resolveContest(wd, problem, contestID)
 
-			// If already inside the contest directory, use wd; otherwise join it.
-			var contestDir string
-			if filepath.Base(wd) == contestID {
-				contestDir = wd
-			} else {
-				contestDir = filepath.Join(wd, contestID)
-			}
-
-			lang := detectLang(wd, contestDir, contestID, problem)
+			lang, _ := detectLang(contestRoot, cid, problemID)
 			if lang == "" {
-				fmt.Printf("Error: could not detect language for problem %s\n", problem)
+				fmt.Printf("Error: could not detect language for problem %s\n", problemID)
 				return
 			}
 
 			opts := runner.Options{
 				Lang:      lang,
-				ContestID: contestID,
-				ProblemID: problem,
-				WorkDir:   wd,
+				ContestID: cid,
+				ProblemID: problemID,
+				WorkDir:   contestRoot,
 			}
 
 			results, err := runner.Run(opts)
@@ -110,7 +94,7 @@ func init() {
 			}
 
 			if sample > 0 {
-				sampleName := fmt.Sprintf("%s_%d", strings.ToLower(problem), sample)
+				sampleName := fmt.Sprintf("%s_%d", strings.ToLower(problemID), sample)
 				var filtered []runner.Result
 				for _, r := range results {
 					if r.SampleName == sampleName {
@@ -120,7 +104,7 @@ func init() {
 				}
 				results = filtered
 				if len(results) == 0 {
-					fmt.Printf("Error: sample %d not found for problem %s\n", sample, problem)
+					fmt.Printf("Error: sample %d not found for problem %s\n", sample, problemID)
 					return
 				}
 			}
@@ -136,22 +120,48 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 }
 
-func detectLang(wd, contestDir, contestID, problemID string) runner.Lang {
+// resolveContest reconciles the flag-supplied -p / -c with the cwd and returns
+// the contestRoot (parent of the contest directory, suitable as
+// runner.Options.WorkDir), the contestID, and the problemID. When invoked from
+// inside the contest directory itself (cwd basename == contestID), contestRoot
+// drops to the parent so that joining contestRoot/contestID still yields the
+// contest dir — without this, runner.Options paths would double-nest.
+func resolveContest(wd, rawProblem, explicitContest string) (contestRoot, contestID, problemID string) {
+	inferred, prob := parseProblemArg(rawProblem)
+	cid := explicitContest
+	if cid == "" {
+		cid = inferred
+	}
+	if cid == "" {
+		cid = filepath.Base(wd)
+	}
+	root := wd
+	if filepath.Base(wd) == cid {
+		root = filepath.Dir(wd)
+	}
+	return root, cid, prob
+}
+
+// detectLang returns the language for problemID along with the goPattern that
+// was searched. The goPattern is returned regardless of outcome so callers can
+// surface it in error messages without re-deriving the pattern.
+func detectLang(contestRoot, contestID, problemID string) (runner.Lang, string) {
+	contestDir := filepath.Join(contestRoot, contestID)
 	goPattern := filepath.Join(contestDir, strings.ToUpper(problemID)+".*.go")
 	matches, err := filepath.Glob(goPattern)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: glob pattern %q: %v\n", goPattern, err)
 	}
 	if len(matches) > 0 {
-		return runner.LangGo
+		return runner.LangGo, goPattern
 	}
 
-	rsFile := filepath.Join(wd, contestID+".rs")
+	rsFile := filepath.Join(contestRoot, contestID+".rs")
 	if _, err := os.Stat(rsFile); err == nil {
-		return runner.LangRust
+		return runner.LangRust, goPattern
 	}
 
-	return ""
+	return "", goPattern
 }
 
 func printResults(results []runner.Result) {

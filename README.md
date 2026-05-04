@@ -87,8 +87,11 @@ Language is auto-detected: if `<contest>/<PROBLEM>.*.go` exists it's Go, otherwi
 # Print to stdout
 sinit bundle -p abc455c
 
-# Write to a file
-sinit bundle -p abc455c -o submission.go
+# Write to ./submit.go (default file when -o has no value)
+sinit bundle -p abc455c -o
+
+# Write to a custom path (must use "=" — space-separated form is not accepted)
+sinit bundle -p abc455c -o=submission.go
 
 # Copy straight to the clipboard
 sinit bundle -p abc455c --copy
@@ -98,7 +101,7 @@ sinit bundle -p abc455c --copy
 |---|---|---|
 | `-p`, `--problem` | *(required)* | problem ID, same syntax as `run` |
 | `-c`, `--contest` | *(inferred)* | overrides the contest inferred from `-p` or the cwd |
-| `-o`, `--output`  | *(stdout)* | write the bundle to this file |
+| `-o`, `--output`  | *(stdout)* | write the bundle to a file; `-o` alone uses `submit.go`, `-o=NAME` uses `NAME` |
 | `--copy`          | `false` | copy the bundle to the system clipboard |
 
 Inlines the `goin` helper library (and any other internal imports) into a single source file using [`gollect`](https://github.com/murosan/gollect), which is vendored as a library — no separate binary to install.

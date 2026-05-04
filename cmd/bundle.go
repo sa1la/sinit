@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -22,7 +21,21 @@ func init() {
 	bundleCmd := &cobra.Command{
 		Use:   "bundle",
 		Short: "Bundle a Go solution into a single submission-ready file",
-		Long:  "Generate a self-contained single-file Go bundle using gollect, suitable for submission to AtCoder.",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				return fmt.Errorf(`unexpected positional argument %q; for output file use "-o=NAME" (space-separated form is not supported)`, args[0])
+			}
+			return nil
+		},
+		Long: `Generate a self-contained single-file Go bundle using gollect, suitable for AtCoder submission.
+
+Only Go solutions are supported (Rust does not need bundling).
+
+Output modes:
+  (no flag)   write to stdout (suitable for piping)
+  -o          write to ./submit.go
+  -o=NAME     write to ./NAME
+  --copy      copy bundle to system clipboard`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if !atcoder.CheckValidDir() {
 				return
@@ -39,18 +52,15 @@ func init() {
 				return
 			}
 
-			inferred, prob := parseProblemArg(problem)
-			problem = prob
-			if contestID == "" {
-				contestID = inferred
-			}
-			if contestID == "" {
-				contestID = filepath.Base(wd)
-			}
+			contestRoot, cid, problemID := resolveContest(wd, problem, contestID)
 
-			lang := detectLang(wd, filepath.Join(wd, contestID), contestID, problem)
-			if lang != runner.LangGo {
-				fmt.Printf("Error: bundle only supports Go solutions (detected: %s)\n", lang)
+			lang, goPattern := detectLang(contestRoot, cid, problemID)
+			switch lang {
+			case runner.LangRust:
+				fmt.Println("Error: bundle is Go-only; Rust solutions don't need bundling")
+				return
+			case "":
+				fmt.Printf("Error: no Go source for problem %q in contest %q (looked for %s)\n", problemID, cid, goPattern)
 				return
 			}
 
@@ -63,9 +73,9 @@ func init() {
 
 			opts := runner.Options{
 				Lang:      runner.LangGo,
-				ContestID: contestID,
-				ProblemID: problem,
-				WorkDir:   wd,
+				ContestID: cid,
+				ProblemID: problemID,
+				WorkDir:   contestRoot,
 			}
 
 			bundlePath, err := runner.BundleGo(opts, tmpDir)
@@ -100,7 +110,8 @@ func init() {
 
 	bundleCmd.Flags().StringVarP(&problem, "problem", "p", "", "problem ID (e.g., c, 455c, abc455c)")
 	bundleCmd.Flags().StringVarP(&contestID, "contest", "c", "", "contest ID (defaults to current directory name)")
-	bundleCmd.Flags().StringVarP(&output, "output", "o", "", "output file (default: stdout)")
+	bundleCmd.Flags().StringVarP(&output, "output", "o", "", `output file (use "-o" alone for "submit.go", "-o=NAME" for a specific name)`)
+	bundleCmd.Flags().Lookup("output").NoOptDefVal = "submit.go"
 	bundleCmd.Flags().BoolVar(&copyFlag, "copy", false, "copy bundle to clipboard")
 
 	rootCmd.AddCommand(bundleCmd)
