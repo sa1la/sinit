@@ -16,7 +16,7 @@ func TestParseProblemArg(t *testing.T) {
 		{"arc183f", "arc183", "f"},
 		{"agc065a", "agc065", "a"},
 		{"abc-455-c", "", "abc-455-c"}, // unparseable, passthrough
-		{"abc", "", "abc"},              // letters only, no digits/letter form
+		{"abc", "", "abc"},             // letters only, no digits/letter form
 		{"", "", ""},
 	}
 	for _, tt := range tests {

@@ -15,9 +15,10 @@ import (
 const defaultContestPrefix = "abc"
 
 // problemArgPattern matches combined -p forms:
-//   "c"        -> letter only          (legacy)
-//   "455c"     -> digits + letter      (apply default prefix)
-//   "abc455c"  -> prefix + digits + letter
+//
+//	"c"        -> letter only          (legacy)
+//	"455c"     -> digits + letter      (apply default prefix)
+//	"abc455c"  -> prefix + digits + letter
 var problemArgPattern = regexp.MustCompile(`^([a-z]{3})?(\d+)?([a-z])$`)
 
 // parseProblemArg splits a combined -p value into (contestID, problemID).
@@ -27,10 +28,11 @@ var problemArgPattern = regexp.MustCompile(`^([a-z]{3})?(\d+)?([a-z])$`)
 // explicit -c override.
 //
 // Examples:
-//   "c"       -> ("",       "c")
-//   "455c"    -> ("abc455", "c")
-//   "abc455c" -> ("abc455", "c")
-//   "arc183f" -> ("arc183", "f")
+//
+//	"c"       -> ("",       "c")
+//	"455c"    -> ("abc455", "c")
+//	"abc455c" -> ("abc455", "c")
+//	"arc183f" -> ("arc183", "f")
 func parseProblemArg(raw string) (contestID, problemID string) {
 	raw = strings.ToLower(raw)
 	m := problemArgPattern.FindStringSubmatch(raw)
