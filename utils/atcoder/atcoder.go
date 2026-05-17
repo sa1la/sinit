@@ -18,6 +18,8 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
+const retryDelay = 500 * time.Millisecond
+
 type Lang string
 
 const (
@@ -349,10 +351,28 @@ func writeProblemSamples(prob Problem, perProblem bool, force bool) error {
 }
 
 func writeAllProblemSamples(problems []Problem, perProblem bool, force bool) error {
-	for _, prob := range problems {
-		if err := writeProblemSamples(prob, perProblem, force); err != nil {
-			return err
+	var errs []string
+	needDelay := len(problems) > 1
+	for i, prob := range problems {
+		var err error
+		for attempt := 1; attempt <= 3; attempt++ {
+			if attempt > 1 {
+				time.Sleep(retryDelay)
+			}
+			err = writeProblemSamples(prob, perProblem, force)
+			if err == nil {
+				break
+			}
 		}
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", prob.ID, err))
+		}
+		if needDelay && i < len(problems)-1 {
+			time.Sleep(retryDelay)
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("sample fetch incomplete:\n%s", strings.Join(errs, "\n"))
 	}
 	return nil
 }
