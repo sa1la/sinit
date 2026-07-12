@@ -14,9 +14,9 @@ func newAtcoderCmd(use, short, long string, lang atcoder.Lang) *cobra.Command {
 		Use:   use,
 		Short: short,
 		Long:  long,
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			if !atcoder.CheckValidDir() {
-				return
+				return fmt.Errorf("not an atcoder directory")
 			}
 			if contestID == "" {
 				fmt.Print("which contest?(etc: abc133/arc101): ")
@@ -24,14 +24,14 @@ func newAtcoderCmd(use, short, long string, lang atcoder.Lang) *cobra.Command {
 			}
 			fmt.Println("creating...")
 			if err := atcoder.CreateContestsTasks(contestID, lang, force); err != nil {
-				fmt.Println(err)
-				return
+				return err
 			}
 			fmt.Println("let's go.")
+			return nil
 		},
 	}
 	cmd.Flags().StringVarP(&contestID, "contest", "c", "", "-c=abc376")
-	cmd.Flags().BoolVarP(&force, "force", "f", false, "overwrite existing sample files")
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "overwrite existing source and sample files")
 	return cmd
 }
 

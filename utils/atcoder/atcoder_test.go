@@ -138,3 +138,102 @@ func TestExtractSamples_NoSamples(t *testing.T) {
 		t.Errorf("len(samples) = %d, want 0", len(samples))
 	}
 }
+
+func TestWriteSourceFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "abc.rs")
+
+	created, err := writeSourceFile([]byte("v1"), path, false)
+	if err != nil {
+		t.Fatalf("writeSourceFile create: %v", err)
+	}
+	if !created {
+		t.Fatal("writeSourceFile create: want created=true")
+	}
+
+	skipped, err := writeSourceFile([]byte("v2"), path, false)
+	if err != nil {
+		t.Fatalf("writeSourceFile exists: %v", err)
+	}
+	if skipped {
+		t.Fatal("writeSourceFile exists: want created=false")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+	if string(data) != "v1" {
+		t.Errorf("content = %q, want %q", string(data), "v1")
+	}
+
+	overwritten, err := writeSourceFile([]byte("v2"), path, true)
+	if err != nil {
+		t.Fatalf("writeSourceFile force: %v", err)
+	}
+	if !overwritten {
+		t.Fatal("writeSourceFile force: want created=true")
+	}
+	data, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read file after force: %v", err)
+	}
+	if string(data) != "v2" {
+		t.Errorf("content after force = %q, want %q", string(data), "v2")
+	}
+}
+
+func TestRustContestHeader(t *testing.T) {
+	got := rustContestHeader("abc466")
+	wantSubstrings := []string{
+		"// ABC466 - AtCoder Beginner Contest 466",
+		"https://atcoder.jp/contests/abc466/tasks",
+		"use proconio::input;",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(got, want) {
+			t.Errorf("rustContestHeader() missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+func TestEnsureModEntry(t *testing.T) {
+	dir := t.TempDir()
+	modPath := filepath.Join(dir, "mod.rs")
+	if err := os.WriteFile(modPath, []byte("pub mod abc001;\n"), 0o644); err != nil {
+		t.Fatalf("write mod.rs: %v", err)
+	}
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(originalDir) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	if err := ensureModEntry("abc002"); err != nil {
+		t.Fatalf("ensureModEntry: %v", err)
+	}
+	data, err := os.ReadFile(modPath)
+	if err != nil {
+		t.Fatalf("read mod.rs: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "pub mod abc001;") {
+		t.Errorf("mod.rs lost existing entry: %q", content)
+	}
+	if !strings.Contains(content, "pub mod abc002;") {
+		t.Errorf("mod.rs missing new entry: %q", content)
+	}
+
+	if err := ensureModEntry("abc002"); err != nil {
+		t.Fatalf("ensureModEntry duplicate: %v", err)
+	}
+	data, err = os.ReadFile(modPath)
+	if err != nil {
+		t.Fatalf("read mod.rs again: %v", err)
+	}
+	if strings.Count(string(data), "pub mod abc002;") != 1 {
+		t.Errorf("mod.rs duplicated entry: %q", string(data))
+	}
+}

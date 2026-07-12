@@ -46,9 +46,7 @@ func Solve{{.ID}}() {
 // {{.URL}}
 #[allow(dead_code)]
 pub fn solve_{{.ID}}() {
-	input! {
-		// from source
-	}
+  input! {}
 }
 
 `
@@ -73,7 +71,6 @@ type langSpec struct {
 	formatter   string
 	formatArgs  func(target string) []string
 	transformID func(string) string
-	header      string // written once at the top of single-file output
 }
 
 type langEntry struct {
@@ -102,7 +99,6 @@ var (
 				formatter:   "rustfmt",
 				formatArgs:  func(file string) []string { return []string{file} },
 				transformID: strings.ToLower,
-				header:      "use proconio::input;\n\n",
 			},
 		},
 	}
@@ -121,6 +117,7 @@ func CreateContestsTasks(contestID string, lang Lang, force bool) error {
 	if !ok {
 		return fmt.Errorf("unsupported lang: %q", lang)
 	}
+	contestID = strings.ToLower(contestID)
 	url := fmt.Sprintf("%s/contests/%s/tasks?lang=en", atcoderHost, contestID)
 	body, err := fetchHTML(url, contestID)
 	if err != nil {
@@ -230,23 +227,18 @@ func extractSamplesFromBody(body []byte) ([]Sample, error) {
 }
 
 func createFile(data []byte, fileName string) (bool, error) {
-	file, err := os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-	if err != nil {
-		if errors.Is(err, fs.ErrExist) {
-			return false, nil
-		}
-		return false, fmt.Errorf("create %s: %w", fileName, err)
-	}
-	defer file.Close()
-	if _, err := file.Write(data); err != nil {
-		return false, fmt.Errorf("write %s: %w", fileName, err)
-	}
-	return true, nil
+	return writeFile(data, fileName, false, true)
 }
 
-func writeSampleFile(data []byte, fileName string, force bool) (bool, error) {
+func writeSourceFile(data []byte, fileName string, force bool) (bool, error) {
+	return writeFile(data, fileName, force, true)
+}
+
+func writeFile(data []byte, fileName string, force, truncate bool) (bool, error) {
 	flags := os.O_WRONLY | os.O_CREATE
-	if !force {
+	if force && truncate {
+		flags |= os.O_TRUNC
+	} else if !force {
 		flags |= os.O_EXCL
 	}
 	file, err := os.OpenFile(fileName, flags, 0o644)
@@ -261,6 +253,71 @@ func writeSampleFile(data []byte, fileName string, force bool) (bool, error) {
 		return false, fmt.Errorf("write %s: %w", fileName, err)
 	}
 	return true, nil
+}
+
+func contestKind(contestID string) string {
+	switch {
+	case strings.HasPrefix(contestID, "abc"):
+		return "AtCoder Beginner Contest"
+	case strings.HasPrefix(contestID, "arc"):
+		return "AtCoder Regular Contest"
+	case strings.HasPrefix(contestID, "agc"):
+		return "AtCoder Grand Contest"
+	case strings.HasPrefix(contestID, "ahc"):
+		return "AtCoder Heuristic Contest"
+	default:
+		return "AtCoder Contest"
+	}
+}
+
+func contestNumber(contestID string) string {
+	var num strings.Builder
+	for _, r := range contestID {
+		if r >= '0' && r <= '9' {
+			num.WriteRune(r)
+		}
+	}
+	return num.String()
+}
+
+func rustContestHeader(contestID string) string {
+	upper := strings.ToUpper(contestID)
+	num := contestNumber(contestID)
+	return fmt.Sprintf(
+		"// %s - %s %s\n// %s/contests/%s/tasks\n\nuse proconio::input;\n\n",
+		upper, contestKind(contestID), num, atcoderHost, contestID,
+	)
+}
+
+func ensureModEntry(contestID string) error {
+	modPath := "mod.rs"
+	if _, err := os.Stat(modPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat mod.rs: %w", err)
+	}
+
+	data, err := os.ReadFile(modPath)
+	if err != nil {
+		return fmt.Errorf("read mod.rs: %w", err)
+	}
+
+	entry := fmt.Sprintf("pub mod %s;", contestID)
+	if strings.Contains(string(data), entry) {
+		return nil
+	}
+
+	content := string(data)
+	if content != "" && !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	content += entry + "\n"
+	return os.WriteFile(modPath, []byte(content), 0o644)
+}
+
+func writeSampleFile(data []byte, fileName string, force bool) (bool, error) {
+	return writeFile(data, fileName, force, false)
 }
 
 func createContestsProblems(problems []Problem, contestID string, entry langEntry, force bool) error {
@@ -289,9 +346,7 @@ func createContestsProblems(problems []Problem, contestID string, entry langEntr
 	} else {
 		fileName := fmt.Sprintf("%s.%s", contestID, entry.spec.ext)
 		var content strings.Builder
-		if entry.spec.header != "" {
-			content.WriteString(entry.spec.header)
-		}
+		content.WriteString(rustContestHeader(contestID))
 		for _, prob := range problems {
 			p := prob
 			p.ID = entry.spec.transformID(prob.ID)
@@ -299,7 +354,7 @@ func createContestsProblems(problems []Problem, contestID string, entry langEntr
 				return fmt.Errorf("render %s: %w", p.ID, err)
 			}
 		}
-		if c, err := createFile([]byte(content.String()), fileName); err != nil {
+		if c, err := writeSourceFile([]byte(content.String()), fileName, force); err != nil {
 			return err
 		} else if c {
 			created = true
@@ -309,6 +364,12 @@ func createContestsProblems(problems []Problem, contestID string, entry langEntr
 
 	if err := writeAllProblemSamples(problems, entry.spec.perProblem, force); err != nil {
 		return err
+	}
+
+	if !entry.spec.perProblem {
+		if err := ensureModEntry(contestID); err != nil {
+			return err
+		}
 	}
 
 	if !created {
